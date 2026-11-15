@@ -46,6 +46,7 @@ Status: SQLite MVP
 - A contribution has at most one payout transaction.
 - Only the caller may finalize a decision.
 - Open calls must have confirmed funding.
+- Only an unfunded draft may be updated or deleted; deletion also removes its draft-only events.
 - Uploaded files use generated names and are not publicly served.
 
 Avoid additional tables until a demonstrated feature requires them.

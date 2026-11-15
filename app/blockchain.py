@@ -75,6 +75,14 @@ class BlockchainService:
             return TransactionState("pending", confirmations)
         return TransactionState("confirmed", confirmations)
 
+    def transaction_sender(self, tx_hash: str) -> str | None:
+        try:
+            transaction = self.web3.eth.get_transaction(cast(HexStr, tx_hash))
+        except Exception:
+            return None
+        sender = transaction.get("from")
+        return Web3.to_checksum_address(sender) if sender else None
+
     def call_is_funded(self, call_id: int, minimum_balance: int, owner: str) -> bool:
         chain_owner, remaining, _deadline, exists = self.contract.functions.calls(call_id).call()
         return (

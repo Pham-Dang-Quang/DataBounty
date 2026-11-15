@@ -40,6 +40,10 @@ Accept one image or UTF-8 text file per contribution. Multiple files, archives, 
 
 Support `standard` and optional `high` rewards. Avoid configurable weighted scoring systems in the MVP.
 
+### Draft-only call changes
+
+Callers may edit or remove only an unfunded draft. Funding submission freezes all terms, and funded calls remain available for escrow and activity history.
+
 ## Still to choose
 
-- Fuji deployment addresses
+- Nothing required for the hackathon MVP.

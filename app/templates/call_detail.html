@@ -23,9 +23,17 @@
   <section class="panel">
     {% if user and user.id == data_call.caller_id %}
       <h2>Caller controls</h2>
-      {% if data_call.status in ['draft', 'funding'] %}
+      {% if data_call.status == 'draft' %}
+        <div class="actions">
+          <a class="button secondary" href="/calls/{{ data_call.id }}/edit">Edit draft</a>
+          <form method="post" action="/calls/{{ data_call.id }}/delete" onsubmit="return confirm('Remove this unfunded draft?');">
+            <button class="button danger" type="submit">Remove draft</button>
+          </form>
+        </div>
         {% if escrow_address and token_address %}
           <p>Fund the maximum liability of <strong>{{ format_token(data_call.required_budget, token_decimals) }} {{ token_symbol }}</strong>.</p>
+          <button class="button secondary" type="button" data-mint-demo-token
+            data-amount="{{ data_call.required_budget }}">Get demo {{ token_symbol }}</button>
           <button class="button" data-fund-call
             data-call-id="{{ data_call.escrow_call_id }}"
             data-budget="{{ data_call.required_budget }}"
@@ -34,6 +42,8 @@
         {% else %}
           <div class="notice warning">Set escrow and token addresses in <code>.env</code> before funding.</div>
         {% endif %}
+      {% elif data_call.status == 'funding' %}
+        <p>Funding was submitted. The call terms are now frozen while Fuji confirmation is pending.</p>
       {% else %}
         <a class="button" href="/calls/{{ data_call.id }}/review">Review contributions ({{ data_call.contributions|length }})</a>
       {% endif %}

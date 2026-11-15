@@ -1,21 +1,21 @@
 {% extends "base.html" %}
-{% block title %}Create call · {{ app_name }}{% endblock %}
+{% block title %}{{ form_title }} · {{ app_name }}{% endblock %}
 {% block content %}
 <div class="page-heading">
-  <p class="eyebrow">New data call</p>
+  <p class="eyebrow">{{ form_title }}</p>
   <h1>Describe the smallest useful dataset</h1>
 </div>
-<form class="panel form-grid" method="post" action="/calls">
-  <label>Title<input name="title" maxlength="120" required placeholder="Street trees in Ho Chi Minh City"></label>
-  <label>Data type<select name="data_type"><option value="image">Image</option><option value="text">Text</option></select></label>
-  <label class="full">Description<textarea name="description" required placeholder="What the data will be used for"></textarea></label>
-  <label class="full">Acceptance criteria<textarea name="acceptance_criteria" required placeholder="One clear subject, daylight, no visible faces, location in metadata"></textarea></label>
-  <label>Review mode<select name="review_mode"><option value="ai_assisted">AI-assisted</option><option value="manual">Manual</option></select></label>
-  <label>Maximum accepted<input type="number" name="max_acceptances" min="1" max="100" value="5" required></label>
-  <label>Standard reward ({{ token_symbol }})<input type="number" name="standard_reward" min="0.000001" step="0.000001" value="1" required></label>
-  <label>High reward (optional)<input type="number" name="high_reward" min="0.000001" step="0.000001" placeholder="2"></label>
-  <label>Deadline (UTC)<input type="datetime-local" name="deadline" required></label>
-  <div class="full actions"><button class="button" type="submit">Create draft</button><a href="/">Cancel</a></div>
+<form class="panel form-grid" method="post" action="{{ form_action }}">
+  <label>Title<input name="title" maxlength="120" required placeholder="Street trees in Ho Chi Minh City" value="{{ data_call.title if data_call else '' }}"></label>
+  <label>Data type<select name="data_type"><option value="image" {% if data_call and data_call.data_type == 'image' %}selected{% endif %}>Image</option><option value="text" {% if data_call and data_call.data_type == 'text' %}selected{% endif %}>Text</option></select></label>
+  <label class="full">Description<textarea name="description" required placeholder="What the data will be used for">{{ data_call.description if data_call else '' }}</textarea></label>
+  <label class="full">Acceptance criteria<textarea name="acceptance_criteria" required placeholder="One clear subject, daylight, no visible faces, location in metadata">{{ data_call.acceptance_criteria if data_call else '' }}</textarea></label>
+  <label>Review mode<select name="review_mode"><option value="ai_assisted" {% if not data_call or data_call.review_mode == 'ai_assisted' %}selected{% endif %}>AI-assisted</option><option value="manual" {% if data_call and data_call.review_mode == 'manual' %}selected{% endif %}>Manual</option></select></label>
+  <label>Maximum accepted<input type="number" name="max_acceptances" min="1" max="100" value="{{ data_call.max_acceptances if data_call else 5 }}" required></label>
+  <label>Standard reward ({{ token_symbol }})<input type="number" name="standard_reward" min="0.000001" step="0.000001" value="{{ format_token(data_call.standard_reward, token_decimals) if data_call else 1 }}" required></label>
+  <label>High reward (optional)<input type="number" name="high_reward" min="0.000001" step="0.000001" value="{{ format_token(data_call.high_reward, token_decimals) if data_call and data_call.high_reward else '' }}" placeholder="2"></label>
+  <label>Deadline (UTC)<input type="datetime-local" name="deadline" value="{{ data_call.deadline.strftime('%Y-%m-%dT%H:%M') if data_call else '' }}" required></label>
+  <div class="full actions"><button class="button" type="submit">{{ submit_label }}</button><a href="{{ '/calls/' ~ data_call.id if data_call else '/' }}">Cancel</a></div>
 </form>
 {% endblock %}
 

@@ -16,7 +16,10 @@ Most pages are server-rendered. JSON endpoints exist only where JavaScript needs
 - `GET /calls/new` — call form.
 - `POST /calls` — create draft call.
 - `GET /calls/{id}` — call detail and contribution form.
-- `POST /calls/{id}/funding-tx` — record a submitted funding transaction hash.
+- `GET /calls/{id}/edit` — caller-only edit form for an unfunded draft.
+- `POST /calls/{id}/edit` — update an unfunded draft.
+- `POST /calls/{id}/delete` — remove an unfunded draft.
+- `POST /calls/{id}/funding-tx` — record a submitted funding transaction hash; its sender must match the signed-in caller.
 - `GET /calls/{id}/review` — caller review queue.
 
 ## Contributions
@@ -30,6 +33,7 @@ Most pages are server-rendered. JSON endpoints exist only where JavaScript needs
 
 - Require authentication for mutations.
 - Verify caller ownership for funding, review, and payout actions.
+- Reject edits and removal after funding is submitted.
 - Verify contributor ownership for private contribution views.
 - Accept an idempotency key for decision and transaction-recording requests.
 - Return simple errors with `code`, `message`, and optional field errors.

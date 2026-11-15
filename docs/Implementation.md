@@ -1,6 +1,6 @@
 # Minimal Implementation Plan
 
-Status: Not started
+Status: MVP implemented; final two-wallet contribution and payout demo remains
 
 ## Suggested repository layout
 

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from PIL import Image, UnidentifiedImageError
 
@@ -74,41 +76,57 @@ def evaluate_file(
 
 
 def _evaluate_text(path: Path, criteria: str, model_name: str) -> EvaluationResult:
-    from transformers import pipeline
-
     content = path.read_text(encoding="utf-8")[:4000]
-    classifier = pipeline("zero-shot-classification", model=model_name)
+    classifier = _model_pipeline("zero-shot-classification", model_name)
     output = classifier(
         content,
         candidate_labels=[criteria[:300], "unrelated to the requested data"],
         hypothesis_template="This contribution is {}.",
     )
-    score = float(output["scores"][0])
-    matched = output["labels"][0] == criteria[:300]
-    recommendation = "accept" if matched and score >= 0.65 else "unsure"
-    tier = "high" if matched and score >= 0.85 else "standard"
-    return EvaluationResult(
-        recommendation,
-        tier,
-        f"Zero-shot relevance score: {score:.0%}. Caller review is required.",
-        model_name,
+    labels = [str(label) for label in output["labels"]]
+    scores = [float(score) for score in output["scores"]]
+    relevance = dict(zip(labels, scores, strict=True)).get(criteria[:300], 0.0)
+    return _result_from_relevance(
+        relevance, model_name, f"Zero-shot relevance score: {relevance:.0%}."
     )
 
 
 def _evaluate_image(path: Path, criteria: str, model_name: str) -> EvaluationResult:
+    classifier = _model_pipeline("zero-shot-image-classification", model_name)
+    output = classifier(str(path), candidate_labels=[criteria[:200], "unrelated or unusable image"])
+    relevance = next(
+        (float(item["score"]) for item in output if item["label"] == criteria[:200]),
+        0.0,
+    )
+    return _result_from_relevance(
+        relevance, model_name, f"Image-to-criteria similarity: {relevance:.0%}."
+    )
+
+
+@lru_cache(maxsize=4)
+def _model_pipeline(task: str, model_name: str) -> Any:
+    """Load each configured model once per process instead of once per contribution."""
     from transformers import pipeline
 
-    classifier = pipeline("zero-shot-image-classification", model=model_name)
-    output = classifier(str(path), candidate_labels=[criteria[:200], "unrelated or unusable image"])
-    best = output[0]
-    score = float(best["score"])
-    matched = best["label"] == criteria[:200]
-    recommendation = "accept" if matched and score >= 0.65 else "unsure"
-    tier = "high" if matched and score >= 0.85 else "standard"
+    if task == "zero-shot-classification":
+        return pipeline("zero-shot-classification", model=model_name, device=-1)
+    if task == "zero-shot-image-classification":
+        return pipeline("zero-shot-image-classification", model=model_name, device=-1)
+    raise ValueError(f"Unsupported model task: {task}")
+
+
+def _result_from_relevance(score: float, model_name: str, explanation: str) -> EvaluationResult:
+    if score >= 0.65:
+        recommendation = "accept"
+    elif score <= 0.35:
+        recommendation = "reject"
+    else:
+        recommendation = "unsure"
+    tier = "high" if recommendation == "accept" and score >= 0.85 else "standard"
     return EvaluationResult(
         recommendation,
         tier,
-        f"Image-to-criteria similarity: {score:.0%}. Caller review is required.",
+        f"{explanation} Caller review is required.",
         model_name,
     )
 

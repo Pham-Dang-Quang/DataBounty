@@ -17,14 +17,15 @@ The same wallet may act as both.
 
 1. User connects a wallet and signs in.
 2. Caller creates a data call.
-3. Caller funds the call’s escrow with the demo ERC-20 token.
-4. The call becomes open after funding is confirmed.
-5. Contributor uploads one image or text file.
-6. The platform performs basic validation and, if enabled, asks the AI model to evaluate the file against the caller’s criteria.
-7. Caller sees the file, validation result, AI recommendation, quality tier, and explanation.
-8. Caller accepts or rejects the contribution.
-9. For acceptance, the caller sends the payout transaction through their wallet.
-10. The UI shows the confirmed transaction and updated escrow balance.
+3. Caller may edit or remove the unfunded draft.
+4. Caller funds the call’s escrow with the demo ERC-20 token.
+5. The call becomes open after funding is confirmed.
+6. Contributor uploads one image or text file.
+7. The platform performs basic validation and, if enabled, asks the AI model to evaluate the file against the caller’s criteria.
+8. Caller sees the file, validation result, AI recommendation, quality tier, and explanation.
+9. Caller accepts or rejects the contribution.
+10. For acceptance, the caller sends the payout transaction through their wallet.
+11. The UI shows the confirmed transaction and updated escrow balance.
 
 ## Data call fields
 
@@ -37,7 +38,7 @@ The same wallet may act as both.
 - Maximum accepted contributions
 - Deadline
 
-Terms are frozen when the call opens.
+The caller may edit or remove only an unfunded draft. Terms freeze as soon as funding is submitted. Funded calls cannot be removed because their escrow and activity must remain traceable.
 
 ## AI behavior
 
@@ -54,6 +55,7 @@ Use one small open-source model suitable for the selected modality. Model choice
 ## MVP requirements
 
 - Responsive pages for calls, call creation, contribution upload, and caller review.
+- Caller controls to edit or remove an unfunded draft.
 - Wallet-signature login.
 - Fuji testnet and a demo ERC-20 token.
 - Escrow funding and one-time payouts.

@@ -1,7 +1,9 @@
 import {
+  createPublicClient,
   createWalletClient,
   custom,
   getAddress,
+  http,
   keccak256,
   toHex,
 } from "https://esm.sh/viem@2";
@@ -11,13 +13,24 @@ const root = document.body;
 const expectedChain = Number(root.dataset.chainId || 43113);
 const escrow = root.dataset.escrow;
 const token = root.dataset.token;
+const signedInWallet = root.dataset.userWallet;
 const messageBox = document.querySelector("#wallet-message");
+const publicClient = createPublicClient({
+  chain: avalancheFuji,
+  transport: http(),
+});
 
-const erc20Abi = [{
-  type: "function", name: "approve", stateMutability: "nonpayable",
-  inputs: [{name: "spender", type: "address"}, {name: "amount", type: "uint256"}],
-  outputs: [{name: "", type: "bool"}],
-}];
+const erc20Abi = [
+  {
+    type: "function", name: "approve", stateMutability: "nonpayable",
+    inputs: [{name: "spender", type: "address"}, {name: "amount", type: "uint256"}],
+    outputs: [{name: "", type: "bool"}],
+  },
+  {
+    type: "function", name: "faucet", stateMutability: "nonpayable",
+    inputs: [{name: "amount", type: "uint256"}], outputs: [],
+  },
+];
 
 const escrowAbi = [
   {type: "function", name: "fundCall", stateMutability: "nonpayable", inputs: [
@@ -43,6 +56,13 @@ async function wallet() {
     transport: custom(window.ethereum),
   });
   const [account] = await client.requestAddresses();
+  const activeAccount = getAddress(account);
+  if (signedInWallet && activeAccount !== getAddress(signedInWallet)) {
+    throw new Error(
+      `Core is using ${activeAccount}, but DataBounty is signed in as ${getAddress(signedInWallet)}. ` +
+      "Sign out, select the funding account in Core, then connect again.",
+    );
+  }
   let chainId = await client.getChainId();
   if (chainId !== expectedChain) {
     show("Switching Core to Avalanche Fuji…");
@@ -59,7 +79,7 @@ async function wallet() {
   if (chainId !== avalancheFuji.id) {
     throw new Error(`Core must be connected to Avalanche Fuji (chain ${avalancheFuji.id}).`);
   }
-  return {client, account: getAddress(account)};
+  return {client, account: activeAccount};
 }
 
 async function postJson(url, body) {
@@ -89,6 +109,32 @@ document.querySelector("[data-logout]")?.addEventListener("click", async () => {
   window.location.href = "/";
 });
 
+document.querySelector("[data-mint-demo-token]")?.addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  try {
+    if (!token) throw new Error("The demo token address is not configured.");
+    button.disabled = true;
+    const {client, account} = await wallet();
+    show("Requesting valueless demo DBT from the Fuji faucet…");
+    const hash = await client.writeContract({
+      account,
+      chain: avalancheFuji,
+      address: getAddress(token),
+      abi: erc20Abi,
+      functionName: "faucet",
+      args: [BigInt(button.dataset.amount)],
+    });
+    show("Waiting for the demo DBT transaction to confirm…");
+    const receipt = await publicClient.waitForTransactionReceipt({hash});
+    if (receipt.status !== "success") throw new Error("The demo DBT transaction failed.");
+    show("Demo DBT received. You can now click Fund on Fuji.");
+  } catch (error) {
+    show(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
+
 document.querySelector("[data-fund-call]")?.addEventListener("click", async (event) => {
   const button = event.currentTarget;
   try {
@@ -97,7 +143,7 @@ document.querySelector("[data-fund-call]")?.addEventListener("click", async (eve
     const {client, account} = await wallet();
     const budget = BigInt(button.dataset.budget);
     show("Approving reward token…");
-    await client.writeContract({
+    const approvalHash = await client.writeContract({
       account,
       chain: avalancheFuji,
       address: getAddress(token),
@@ -105,10 +151,18 @@ document.querySelector("[data-fund-call]")?.addEventListener("click", async (eve
       functionName: "approve",
       args: [getAddress(escrow), budget],
     });
+    show("Waiting for the token approval to confirm…");
+    const approvalReceipt = await publicClient.waitForTransactionReceipt({hash: approvalHash});
+    if (approvalReceipt.status !== "success") throw new Error("The token approval failed.");
+    const nonce = await publicClient.getTransactionCount({
+      address: account,
+      blockTag: "pending",
+    });
     show("Submit the escrow funding transaction…");
     const hash = await client.writeContract({
       account, chain: avalancheFuji, address: getAddress(escrow), abi: escrowAbi, functionName: "fundCall",
       args: [BigInt(button.dataset.callId), budget, BigInt(button.dataset.deadline)],
+      nonce,
     });
     await postJson(button.dataset.endpoint, {tx_hash: hash});
     window.location.reload();

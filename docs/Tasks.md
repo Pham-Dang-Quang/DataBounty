@@ -1,6 +1,6 @@
 # Hackathon Tasks
 
-Status: Not started
+Status: Core MVP implemented; final two-wallet contribution and payout demo remains
 
 ## 0. Confirm scope
 
@@ -14,6 +14,7 @@ Status: Not started
 - [x] Add FastAPI, Jinja2, CSS, SQLite, and SQLAlchemy.
 - [x] Implement wallet challenge/signature login.
 - [x] Implement create/list/view data calls.
+- [x] Implement caller-only edit/remove controls for unfunded drafts.
 - [x] Implement validated one-file image/text contribution.
 - [x] Implement caller review and manual decision.
 - [x] Add focused tests for ownership, validation, and duplicate submissions.
@@ -30,7 +31,7 @@ Status: Not started
 
 - [x] Write the minimal escrow contract and mock ERC-20.
 - [x] Test funding, payout, duplicate rejection, insufficient balance, and refund.
-- [ ] Deploy contracts to Fuji and record addresses.
+- [x] Deploy contracts to Fuji and record addresses.
 - [x] Add browser funding and payout transactions with `viem`.
 - [x] Confirm transactions with `web3.py` and update application status.
 

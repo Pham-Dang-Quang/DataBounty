@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 from starlette.middleware.sessions import SessionMiddleware
@@ -171,7 +171,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/calls/new", response_class=HTMLResponse)
     def new_call(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
         require_user(request, db)
-        return render(request, "call_form.html", db=db)
+        return render(
+            request,
+            "call_form.html",
+            db=db,
+            form_action="/calls",
+            form_title="New data call",
+            submit_label="Create draft",
+        )
 
     @app.post("/calls")
     def create_call_route(
@@ -229,6 +236,92 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         db.commit()
         return RedirectResponse(f"/calls/{data_call.id}", status_code=303)
 
+    @app.get("/calls/{call_id}/edit", response_class=HTMLResponse)
+    def edit_call_form(
+        call_id: int, request: Request, db: Session = Depends(get_db)
+    ) -> HTMLResponse:
+        user = require_user(request, db)
+        data_call = editable_draft(db, call_id, user)
+        return render(
+            request,
+            "call_form.html",
+            db=db,
+            data_call=data_call,
+            form_action=f"/calls/{call_id}/edit",
+            form_title="Edit data call",
+            submit_label="Save changes",
+        )
+
+    @app.post("/calls/{call_id}/edit")
+    def edit_call(
+        call_id: int,
+        request: Request,
+        title: str = Form(),
+        description: str = Form(),
+        data_type: str = Form(),
+        acceptance_criteria: str = Form(),
+        review_mode: str = Form(),
+        standard_reward: str = Form(),
+        high_reward: str = Form(""),
+        max_acceptances: int = Form(),
+        deadline: str = Form(),
+        db: Session = Depends(get_db),
+    ) -> RedirectResponse:
+        user = require_user(request, db)
+        data_call = editable_draft(db, call_id, user)
+        try:
+            standard = parse_token_amount(standard_reward, app_settings.token_decimals)
+            high = (
+                parse_token_amount(high_reward, app_settings.token_decimals)
+                if high_reward
+                else None
+            )
+            parsed_deadline = parse_deadline(deadline)
+            validate_call_fields(
+                title,
+                description,
+                acceptance_criteria,
+                data_type,
+                review_mode,
+                standard,
+                high,
+                max_acceptances,
+                parsed_deadline,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        data_call.title = title.strip()
+        data_call.description = description.strip()
+        data_call.data_type = data_type
+        data_call.acceptance_criteria = acceptance_criteria.strip()
+        data_call.review_mode = review_mode
+        data_call.standard_reward = standard
+        data_call.high_reward = high
+        data_call.max_acceptances = max_acceptances
+        data_call.deadline = parsed_deadline
+        db.add(Event(call_id=call_id, event_type="call_updated", message="Draft updated"))
+        db.commit()
+        return RedirectResponse(f"/calls/{call_id}", status_code=303)
+
+    @app.post("/calls/{call_id}/delete")
+    def delete_call(
+        call_id: int, request: Request, db: Session = Depends(get_db)
+    ) -> RedirectResponse:
+        user = require_user(request, db)
+        data_call = editable_draft(db, call_id, user)
+        contribution_count = db.scalar(
+            select(func.count(Contribution.id)).where(Contribution.call_id == call_id)
+        )
+        if contribution_count:
+            raise HTTPException(
+                status_code=409, detail="A call with contributions cannot be removed"
+            )
+        db.execute(delete(Event).where(Event.call_id == call_id))
+        db.delete(data_call)
+        db.commit()
+        return RedirectResponse("/", status_code=303)
+
     @app.get("/calls/{call_id}", response_class=HTMLResponse)
     def call_detail(call_id: int, request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
         data_call = db.scalar(
@@ -256,6 +349,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         validate_tx_hash(payload.tx_hash)
         if data_call.status not in (CallStatus.DRAFT, CallStatus.FUNDING):
             raise HTTPException(status_code=409, detail="Call is not waiting for funding")
+        sender = chain.transaction_sender(payload.tx_hash) if chain.configured else None
+        if chain.configured and sender is None:
+            raise HTTPException(status_code=422, detail="Funding transaction was not found on Fuji")
+        if sender and sender.lower() != data_call.caller.wallet_address.lower():
+            raise HTTPException(
+                status_code=409,
+                detail="The funding wallet must match the wallet signed in to DataBounty",
+            )
         data_call.funding_tx_hash = payload.tx_hash
         data_call.status = CallStatus.FUNDING
         db.add(
@@ -599,6 +700,16 @@ def owned_call(db: Session, call_id: int, user: User) -> DataCall:
         raise HTTPException(status_code=404, detail="Call not found")
     if data_call.caller_id != user.id:
         raise HTTPException(status_code=403, detail="Only the caller can perform this action")
+    return data_call
+
+
+def editable_draft(db: Session, call_id: int, user: User) -> DataCall:
+    data_call = owned_call(db, call_id, user)
+    if data_call.status != CallStatus.DRAFT or data_call.funding_tx_hash is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Only an unfunded draft call can be edited or removed",
+        )
     return data_call
 
 

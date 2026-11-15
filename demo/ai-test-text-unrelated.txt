@@ -1,0 +1,2 @@
+This contribution describes a bowl of fruit on a kitchen table. It contains no road, traffic
+instruction, or street sign and should not match a request for readable street-sign data.
