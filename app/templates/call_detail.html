@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}{{ data_call.title }} · {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <span class="badge {{ data_call.status }}">{{ data_call.status }}</span>
+  <h1>{{ data_call.title }}</h1>
+  <p>{{ data_call.description }}</p>
+</div>
+
+<div class="two-column">
+  <section class="panel">
+    <h2>Requirements</h2>
+    <dl>
+      <dt>Type</dt><dd>{{ data_call.data_type }}</dd>
+      <dt>Review</dt><dd>{{ data_call.review_mode.replace('_', ' ') }}</dd>
+      <dt>Criteria</dt><dd>{{ data_call.acceptance_criteria }}</dd>
+      <dt>Standard reward</dt><dd>{{ format_token(data_call.standard_reward, token_decimals) }} {{ token_symbol }}</dd>
+      {% if data_call.high_reward %}<dt>High reward</dt><dd>{{ format_token(data_call.high_reward, token_decimals) }} {{ token_symbol }}</dd>{% endif %}
+      <dt>Deadline</dt><dd>{{ data_call.deadline }} UTC</dd>
+    </dl>
+  </section>
+
+  <section class="panel">
+    {% if user and user.id == data_call.caller_id %}
+      <h2>Caller controls</h2>
+      {% if data_call.status in ['draft', 'funding'] %}
+        {% if escrow_address and token_address %}
+          <p>Fund the maximum liability of <strong>{{ format_token(data_call.required_budget, token_decimals) }} {{ token_symbol }}</strong>.</p>
+          <button class="button" data-fund-call
+            data-call-id="{{ data_call.escrow_call_id }}"
+            data-budget="{{ data_call.required_budget }}"
+            data-deadline="{{ unix_timestamp(data_call.deadline) }}"
+            data-endpoint="/calls/{{ data_call.id }}/funding-tx">Fund on Fuji</button>
+        {% else %}
+          <div class="notice warning">Set escrow and token addresses in <code>.env</code> before funding.</div>
+        {% endif %}
+      {% else %}
+        <a class="button" href="/calls/{{ data_call.id }}/review">Review contributions ({{ data_call.contributions|length }})</a>
+      {% endif %}
+    {% elif data_call.status == 'open' and user %}
+      <h2>Submit one {{ data_call.data_type }}</h2>
+      <form method="post" action="/calls/{{ data_call.id }}/contributions" enctype="multipart/form-data">
+        <label>File<input type="file" name="contribution_file" required {% if data_call.data_type == 'image' %}accept="image/jpeg,image/png,image/webp"{% else %}accept="text/plain,.txt"{% endif %}></label>
+        <p class="muted">Maximum {{ max_upload_mb }} MB. Exact duplicates are rejected.</p>
+        <button class="button" type="submit">Submit contribution</button>
+      </form>
+    {% elif not user %}
+      <p>Connect a wallet to contribute.</p>
+    {% else %}
+      <p>This call is not accepting contributions.</p>
+    {% endif %}
+  </section>
+</div>
+
+<section>
+  <h2>Activity</h2>
+  <ol class="timeline">
+  {% for event in events %}
+    <li><strong>{{ event.message }}</strong><span>{{ event.created_at }}{% if event.tx_hash %} · <a href="{{ explorer_url }}/tx/{{ event.tx_hash }}" target="_blank" rel="noreferrer">transaction</a>{% endif %}</span></li>
+  {% endfor %}
+  </ol>
+</section>
+{% endblock %}
+

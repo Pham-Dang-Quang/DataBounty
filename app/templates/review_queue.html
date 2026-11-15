@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Review · {{ data_call.title }}{% endblock %}
+{% block content %}
+<div class="page-heading"><p class="eyebrow">Caller review</p><h1>{{ data_call.title }}</h1></div>
+{% if contributions %}
+<div class="card-grid">
+  {% for item in contributions %}
+    <a class="card" href="/contributions/{{ item.id }}">
+      <span class="badge {{ item.status }}">{{ item.status.replace('_', ' ') }}</span>
+      <h3>{{ item.original_filename }}</h3>
+      <p>From {{ item.contributor.wallet_address[:6] }}…{{ item.contributor.wallet_address[-4:] }}</p>
+      {% if item.ai_recommendation %}<strong>AI: {{ item.ai_recommendation }} · {{ item.ai_tier }}</strong>{% endif %}
+    </a>
+  {% endfor %}
+</div>
+{% else %}<div class="empty">No contributions yet.</div>{% endif %}
+{% endblock %}
+

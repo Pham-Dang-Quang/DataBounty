@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <p class="eyebrow">AI-assisted data bounties</p>
+  <h1>Request useful data. Review it clearly. Reward it on Avalanche.</h1>
+  <p>Create a small data call, fund it on Fuji, and use transparent AI recommendations without giving AI control of funds.</p>
+  {% if user %}<a class="button" href="/calls/new">Create a data call</a>{% endif %}
+</section>
+
+{% if user and own_calls %}
+<section>
+  <h2>Your calls</h2>
+  <div class="card-grid">
+    {% for call in own_calls %}
+      <a class="card" href="/calls/{{ call.id }}">
+        <span class="badge {{ call.status }}">{{ call.status }}</span>
+        <h3>{{ call.title }}</h3>
+        <p>{{ call.description }}</p>
+      </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<section>
+  <h2>Open calls</h2>
+  {% if calls %}
+  <div class="card-grid">
+    {% for call in calls %}
+      <a class="card" href="/calls/{{ call.id }}">
+        <span class="badge">{{ call.data_type }}</span>
+        <h3>{{ call.title }}</h3>
+        <p>{{ call.description }}</p>
+        <strong>{{ format_token(call.standard_reward, token_decimals) }} {{ token_symbol }} reward</strong>
+      </a>
+    {% endfor %}
+  </div>
+  {% else %}
+    <div class="empty">No funded calls are open yet.</div>
+  {% endif %}
+</section>
+{% endblock %}
+

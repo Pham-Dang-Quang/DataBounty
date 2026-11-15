@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Contribution {{ contribution.id }} · {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <span class="badge {{ contribution.status }}">{{ contribution.status.replace('_', ' ') }}</span>
+  <h1>{{ contribution.original_filename }}</h1>
+  <p>For <a href="/calls/{{ contribution.call_id }}">{{ contribution.data_call.title }}</a></p>
+</div>
+
+<div class="two-column">
+  <section class="panel">
+    <h2>Submitted data</h2>
+    {% if contribution.media_type.startswith('image/') %}
+      <img class="preview" src="/contributions/{{ contribution.id }}/file" alt="Submitted contribution">
+    {% else %}
+      <a class="button secondary" href="/contributions/{{ contribution.id }}/file">Download text file</a>
+    {% endif %}
+    <p class="muted">{{ contribution.media_type }} · {{ contribution.size_bytes }} bytes · SHA-256 {{ contribution.sha256[:12] }}…</p>
+  </section>
+
+  <section class="panel">
+    <h2>AI recommendation</h2>
+    {% if contribution.status == 'evaluating' %}
+      <p>Evaluation is running. Refresh this page shortly.</p>
+    {% elif contribution.ai_recommendation %}
+      <p class="recommendation">{{ contribution.ai_recommendation }} · {{ contribution.ai_tier }}</p>
+      <p>{{ contribution.ai_explanation }}</p>
+      <p class="muted">Evaluator: {{ contribution.model_name }}</p>
+    {% else %}
+      <p>This call uses manual review.</p>
+    {% endif %}
+
+    {% if user.id == contribution.data_call.caller_id and contribution.status in ['ready_for_review', 'evaluation_error'] %}
+    <form method="post" action="/contributions/{{ contribution.id }}/decision" class="decision-form">
+      <label>Reward tier<select name="tier"><option value="standard">Standard</option>{% if contribution.data_call.high_reward %}<option value="high">High</option>{% endif %}</select></label>
+      <div class="actions">
+        <button class="button" name="decision" value="accept">Accept</button>
+        <button class="button danger" name="decision" value="reject">Reject</button>
+      </div>
+    </form>
+    {% endif %}
+
+    {% if user.id == contribution.data_call.caller_id and contribution.status == 'awaiting_payout' %}
+      {% if escrow_address %}
+      <button class="button" data-pay-contribution
+        data-call-id="{{ contribution.data_call.escrow_call_id }}"
+        data-contribution-id="{{ contribution.id }}"
+        data-recipient="{{ contribution.contributor.wallet_address }}"
+        data-amount="{{ contribution.reward_amount }}"
+        data-endpoint="/contributions/{{ contribution.id }}/payout-tx">Pay {{ format_token(contribution.reward_amount, token_decimals) }} {{ token_symbol }}</button>
+      {% else %}<div class="notice warning">Configure the escrow address to submit payout.</div>{% endif %}
+    {% elif contribution.status == 'paid' %}
+      <p class="success">Paid {{ format_token(contribution.reward_amount, token_decimals) }} {{ token_symbol }}.</p>
+      <a href="{{ explorer_url }}/tx/{{ contribution.payout_tx_hash }}" target="_blank" rel="noreferrer">View transaction</a>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
+
