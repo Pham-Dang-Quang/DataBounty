@@ -21,7 +21,15 @@
   <section class="panel">
     <h2>AI recommendation</h2>
     {% if contribution.status == 'evaluating' %}
-      <p>Evaluation is running. Refresh this page shortly.</p>
+      <div class="evaluation-progress" data-evaluation-progress
+        data-endpoint="/api/contributions/{{ contribution.id }}/evaluation">
+        <progress value="{{ contribution.evaluation_progress }}" max="100"
+          aria-label="AI evaluation progress"></progress>
+        <div class="progress-label" aria-live="polite">
+          <span data-evaluation-stage>{{ contribution.evaluation_stage }}</span>
+          <strong data-evaluation-percent>{{ contribution.evaluation_progress }}%</strong>
+        </div>
+      </div>
     {% elif contribution.ai_recommendation %}
       <p class="recommendation">{{ contribution.ai_recommendation }} · {{ contribution.ai_tier }}</p>
       <p>{{ contribution.ai_explanation }}</p>

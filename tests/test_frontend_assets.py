@@ -38,3 +38,13 @@ def test_wallet_transaction_account_must_match_signed_in_user() -> None:
     assert "data-user-wallet" in base_page
     assert "activeAccount !== getAddress(signedInWallet)" in wallet_js
     assert "DataBounty is signed in as" in wallet_js
+
+
+def test_evaluation_progress_polls_until_complete() -> None:
+    evaluation_js = Path("app/static/js/evaluation.js").read_text(encoding="utf-8")
+    detail_page = Path("app/templates/contribution_detail.html").read_text(encoding="utf-8")
+
+    assert "data-evaluation-progress" in detail_page
+    assert "<progress" in detail_page
+    assert "fetch(evaluation.dataset.endpoint" in evaluation_js
+    assert 'result.status !== "evaluating"' in evaluation_js

@@ -5,7 +5,8 @@ from io import BytesIO
 import pytest
 from PIL import Image
 
-from app.evaluation import _evaluate_image, _evaluate_text, validate_upload
+from app.config import Settings
+from app.evaluation import _evaluate_image, _evaluate_text, evaluate_file, validate_upload
 
 
 def test_validate_image_and_text() -> None:
@@ -59,3 +60,20 @@ def test_image_model_can_reject_unrelated_input(
 
     assert result.recommendation == "reject"
     assert result.tier == "standard"
+
+
+def test_disabled_model_reports_fallback_progress(tmp_path) -> None:
+    contribution = tmp_path / "sample.txt"
+    contribution.write_text("A readable sign", encoding="utf-8")
+    updates: list[tuple[int, str]] = []
+
+    result = evaluate_file(
+        contribution,
+        "text",
+        "a readable street sign",
+        Settings(enable_hf_models=False),
+        lambda percent, stage: updates.append((percent, stage)),
+    )
+
+    assert updates == [(10, "Checking contribution"), (90, "Using safe fallback")]
+    assert result.model_name == "deterministic-fallback"

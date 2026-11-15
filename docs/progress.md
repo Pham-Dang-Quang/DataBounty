@@ -35,6 +35,9 @@ Last updated: 2026-11-15
 - Reconciled call 1 to its confirmed Fuji funder and recorded the successful funding event; the call is now open with 45 DBT escrowed.
 - Enabled the Hugging Face evaluators, cached model pipelines per process, and completed the required three-way `accept`/`unsure`/`reject` classification thresholds.
 - Added matching and unrelated synthetic text contributions plus documented traffic-sign image dataset suggestions.
+- Added persistent evaluation percentage/stage fields, an authenticated polling endpoint, and a responsive live progress bar.
+- Attempted Qwen3-VL replacement, then stopped its 4.3 GB download and restored CLIP at the owner's request.
+- Added cross-platform fresh-clone deployment, Fuji contract, and AI configuration instructions to `README.md`.
 
 ## Files changed
 
@@ -58,7 +61,10 @@ Last updated: 2026-11-15
 - Wallet consistency repair: Ruff and mypy passed, `10 passed`, JavaScript syntax passed, and live Fuji transaction `0xaa43…f506` opened call 1.
 - AI verification: full Ruff and mypy checks passed; `16 passed`.
 - Live text inference scored the matching sample at 89% (`accept/high`) and the unrelated sample at 10% (`reject/standard`).
-- Live CLIP inference completed on a real PNG and returned 40% (`unsure/standard`), confirming the image execution path.
+- Progress-interface verification before the rollback: Ruff and mypy passed, both JavaScript files passed syntax checks, and `19 passed`.
+- Existing SQLite database was migrated additively with `evaluation_progress` and `evaluation_stage`.
+- Rollback verification: Ruff and mypy pass, both JavaScript syntax checks pass, `19 passed`, and live CLIP inference returned 40% (`unsure/standard`).
+- The partial Qwen cache (1.5 GB) and Qwen-only `torchvision` dependency were removed.
 - `forge test`: 4 passed, including 256 fuzz cases.
 - Local Anvil deployment succeeded; token and escrow bytecode deployed and Python getter call matched the contract ABI.
 - Real text-model check returned a structured `unsure`/`standard` result with a 61% relevance explanation; the caller remains the decision-maker.
@@ -70,7 +76,7 @@ Last updated: 2026-11-15
 - Product name is `DataBounty` for the demo.
 - AI implementation status: text and image Hugging Face adapters are implemented; a real text-model inference has been verified.
 - Current runtime status: `ENABLE_HF_MODELS=true`; model loading is cached per process and failures still produce the explicit deterministic `unsure` fallback.
-- Text model is `Horizon-Labs/multilingual-zeroshot-small` (Apache-2.0); image model is CLIP for research/demo use. Both execution paths have live verification.
+- Text model is `Horizon-Labs/multilingual-zeroshot-small` (Apache-2.0); image model is CLIP for research/demo use.
 - AI recommendations never trigger payment; the caller makes the final decision.
 - Fuji token and escrow addresses are configured; live funding for call 1 is confirmed.
 
@@ -80,4 +86,4 @@ Last updated: 2026-11-15
 
 ## Exact next step
 
-Sign in with a second wallet, submit one contribution to open call 1, then sign back in as `0x8D6B…Fc24` to review and pay it.
+Complete the two-wallet contribution and payout demo using the restored CLIP evaluator and live progress interface.

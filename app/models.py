@@ -92,6 +92,10 @@ class Contribution(Base):
     media_type: Mapped[str] = mapped_column(String(100))
     size_bytes: Mapped[int]
     status: Mapped[str] = mapped_column(String(30), default=ContributionStatus.EVALUATING)
+    evaluation_progress: Mapped[int] = mapped_column(default=0, server_default="0")
+    evaluation_stage: Mapped[str] = mapped_column(
+        String(120), default="Queued for evaluation", server_default="Queued for evaluation"
+    )
     ai_recommendation: Mapped[str | None] = mapped_column(String(20))
     ai_tier: Mapped[str | None] = mapped_column(String(20))
     ai_explanation: Mapped[str | None] = mapped_column(Text)

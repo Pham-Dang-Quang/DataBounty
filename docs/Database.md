@@ -28,6 +28,7 @@ Status: SQLite MVP
 - `id`, `call_id`, `contributor_id`
 - `stored_filename`, `original_filename`, `sha256`, `media_type`, `size_bytes`
 - `status`
+- `evaluation_progress`, `evaluation_stage`
 - `ai_recommendation`, `ai_tier`, `ai_explanation`, `model_name`
 - `final_decision`, `final_tier`, `reward_amount`
 - `payout_tx_hash`

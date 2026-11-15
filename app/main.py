@@ -415,6 +415,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if data_call.review_mode == "ai_assisted"
                 else ContributionStatus.READY
             ),
+            evaluation_progress=5 if data_call.review_mode == "ai_assisted" else 100,
+            evaluation_stage=(
+                "Queued for evaluation"
+                if data_call.review_mode == "ai_assisted"
+                else "Manual review"
+            ),
         )
         db.add(contribution)
         try:
@@ -495,6 +501,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             media_type=contribution.media_type,
             filename=contribution.original_filename,
         )
+
+    @app.get("/api/contributions/{contribution_id}/evaluation")
+    def evaluation_status(
+        contribution_id: int, request: Request, db: Session = Depends(get_db)
+    ) -> dict[str, str | int | None]:
+        user = require_user(request, db)
+        contribution = db.scalar(
+            select(Contribution)
+            .options(selectinload(Contribution.data_call))
+            .where(Contribution.id == contribution_id)
+        )
+        if contribution is None:
+            raise HTTPException(status_code=404, detail="Contribution not found")
+        if user.id not in (contribution.contributor_id, contribution.data_call.caller_id):
+            raise HTTPException(status_code=403, detail="Not allowed to view this evaluation")
+        return {
+            "status": str(contribution.status),
+            "progress": max(0, min(100, contribution.evaluation_progress)),
+            "stage": contribution.evaluation_stage,
+            "recommendation": contribution.ai_recommendation,
+        }
 
     @app.post("/contributions/{contribution_id}/decision")
     def decide_contribution(
@@ -624,17 +651,28 @@ def evaluate_contribution(database: Database, settings: Settings, contribution_i
         )
         if contribution is None or contribution.status != ContributionStatus.EVALUATING:
             return
+
+        def report_progress(percent: int, stage: str) -> None:
+            contribution.evaluation_progress = max(
+                contribution.evaluation_progress, min(99, percent)
+            )
+            contribution.evaluation_stage = stage[:120]
+            db.commit()
+
         result = evaluate_file(
             settings.upload_dir / contribution.stored_filename,
             contribution.data_call.data_type,
             contribution.data_call.acceptance_criteria,
             settings,
+            report_progress,
         )
         contribution.ai_recommendation = result.recommendation
         contribution.ai_tier = result.tier
         contribution.ai_explanation = result.explanation
         contribution.model_name = result.model_name
         contribution.status = ContributionStatus.READY
+        contribution.evaluation_progress = 100
+        contribution.evaluation_stage = "Evaluation complete"
         db.add(
             Event(
                 call_id=contribution.call_id,

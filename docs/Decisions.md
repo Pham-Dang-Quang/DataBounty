@@ -30,7 +30,16 @@ Support manual and AI-assisted review. AI returns a recommendation; the caller d
 
 ### Demo evaluators
 
-Use the Apache-2.0 `Horizon-Labs/multilingual-zeroshot-small` text model and CLIP image model behind lazy adapters. Models are optional at runtime, never control payouts, and fall back to an explicit `unsure` result. CLIP is a hackathon/research choice that must be benchmarked or replaced before real deployment.
+Use the Apache-2.0 `Horizon-Labs/multilingual-zeroshot-small` text model and CLIP image model behind
+cached local adapters. Models are optional at runtime, never control payouts, and fall back to an
+explicit `unsure` result. CLIP is a hackathon/research choice that must be benchmarked or replaced
+before real deployment.
+
+### Minimal live evaluation progress
+
+Store a percentage and short stage on each contribution and poll an authenticated JSON endpoint.
+This is sufficient for one-process background evaluation; WebSockets, Redis, and Celery remain
+outside the MVP.
 
 ### Minimal contribution types
 

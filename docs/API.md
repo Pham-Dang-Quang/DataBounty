@@ -26,6 +26,7 @@ Most pages are server-rendered. JSON endpoints exist only where JavaScript needs
 
 - `POST /calls/{id}/contributions` — upload and submit one file.
 - `GET /contributions/{id}` — show status and result.
+- `GET /api/contributions/{id}/evaluation` — return authenticated evaluation progress for polling.
 - `POST /contributions/{id}/decision` — caller accepts or rejects and selects tier.
 - `POST /contributions/{id}/payout-tx` — record a submitted payout transaction hash.
 

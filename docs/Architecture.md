@@ -30,6 +30,10 @@ SQLite stores users, calls, contributions, AI results, and transaction reference
 
 A Python adapter accepts the contribution, caller criteria, and data type. It returns validated structured output: recommendation, tier, and explanation. Run it outside the request path with a simple background task if inference is slow.
 
+Evaluation progress and its current stage are stored on the contribution. The contribution page
+polls one authenticated JSON endpoint while evaluation runs; no WebSocket or job-queue service is
+needed for the MVP.
+
 ### Avalanche Fuji
 
 One small escrow contract holds the demo ERC-20 for calls. It records call funding and prevents duplicate or excessive payouts. The browser submits user-authorized transactions; Python reads events and updates the UI.

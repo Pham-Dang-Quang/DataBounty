@@ -156,3 +156,38 @@ def test_upload_validation_and_transaction_hash(client: ASGITestClient) -> None:
         db.commit()
     invalid_tx = client.post(f"/calls/{call_id}/funding-tx", json={"tx_hash": "not-a-hash"})
     assert invalid_tx.status_code == 422
+
+
+def test_authorized_user_can_poll_evaluation_progress(client: ASGITestClient) -> None:
+    account = Account.create()
+    sign_in(client, account.key.hex())
+    call_id = create_call(client, "Progress check")
+
+    database = client.app.state.database
+    with database.session_factory() as db:
+        data_call = db.get(DataCall, call_id)
+        assert data_call is not None
+        contribution = Contribution(
+            call_id=call_id,
+            contributor_id=data_call.caller_id,
+            stored_filename="progress.txt",
+            original_filename="progress.txt",
+            sha256="a" * 64,
+            media_type="text/plain",
+            size_bytes=10,
+            status=ContributionStatus.EVALUATING,
+            evaluation_progress=65,
+            evaluation_stage="Evaluating each criterion",
+        )
+        db.add(contribution)
+        db.commit()
+        contribution_id = contribution.id
+
+    response = client.get(f"/api/contributions/{contribution_id}/evaluation")
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "evaluating",
+        "progress": 65,
+        "stage": "Evaluating each criterion",
+        "recommendation": None,
+    }
