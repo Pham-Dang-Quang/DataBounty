@@ -34,6 +34,9 @@ Evaluation progress and its current stage are stored on the contribution. The co
 polls one authenticated JSON endpoint while evaluation runs; no WebSocket or job-queue service is
 needed for the MVP.
 
+Before lazy model-library imports, the application exports the configured Hugging Face, Transformers,
+PyTorch, and temporary cache paths. Both adapters also receive `HF_HUB_CACHE` explicitly.
+
 ### Avalanche Fuji
 
 One small escrow contract holds the demo ERC-20 for calls. It records call funding and prevents duplicate or excessive payouts. The browser submits user-authorized transactions; Python reads events and updates the UI.

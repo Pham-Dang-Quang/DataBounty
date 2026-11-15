@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -28,9 +29,57 @@ class Settings(BaseSettings):
     enable_hf_models: bool = False
     text_model: str = "Horizon-Labs/multilingual-zeroshot-small"
     image_model: str = "openai/clip-vit-base-patch32"
+    model_cache_dir: Path = Path("./models-cache")
+    hf_home: Path | None = None
+    hf_hub_cache: Path | None = None
+    transformers_cache: Path | None = None
+    torch_home: Path | None = None
+    tmpdir: Path | None = None
+
+    @property
+    def hf_home_path(self) -> Path:
+        return self.hf_home or self.model_cache_dir / "huggingface"
+
+    @property
+    def hf_hub_cache_path(self) -> Path:
+        return self.hf_hub_cache or self.hf_home_path / "hub"
+
+    @property
+    def transformers_cache_path(self) -> Path:
+        return self.transformers_cache or self.hf_hub_cache_path
+
+    @property
+    def torch_home_path(self) -> Path:
+        return self.torch_home or self.model_cache_dir / "torch"
+
+    @property
+    def tmpdir_path(self) -> Path:
+        return self.tmpdir or self.model_cache_dir / "tmp"
 
     def ensure_directories(self) -> None:
         self.upload_dir.mkdir(parents=True, exist_ok=True)
+        if self.enable_hf_models:
+            model_directories = {
+                self.model_cache_dir,
+                self.hf_home_path,
+                self.hf_hub_cache_path,
+                self.transformers_cache_path,
+                self.torch_home_path,
+                self.tmpdir_path,
+            }
+            for directory in model_directories:
+                directory.mkdir(parents=True, exist_ok=True)
+            environment = {
+                "HF_HOME": self.hf_home_path,
+                "HF_HUB_CACHE": self.hf_hub_cache_path,
+                "TRANSFORMERS_CACHE": self.transformers_cache_path,
+                "TORCH_HOME": self.torch_home_path,
+                "TMPDIR": self.tmpdir_path,
+                "TEMP": self.tmpdir_path,
+                "TMP": self.tmpdir_path,
+            }
+            for name, directory in environment.items():
+                os.environ[name] = str(directory.resolve())
         if self.database_url.startswith("sqlite:///./"):
             Path(self.database_url.removeprefix("sqlite:///./")).parent.mkdir(
                 parents=True, exist_ok=True

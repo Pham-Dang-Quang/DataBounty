@@ -95,6 +95,12 @@ ESCROW_CONTRACT_ADDRESS=0x...
 ENABLE_HF_MODELS=true
 TEXT_MODEL=Horizon-Labs/multilingual-zeroshot-small
 IMAGE_MODEL=openai/clip-vit-base-patch32
+MODEL_CACHE_DIR=./models-cache
+HF_HOME=./models-cache/huggingface
+HF_HUB_CACHE=./models-cache/huggingface/hub
+TRANSFORMERS_CACHE=./models-cache/huggingface/hub
+TORCH_HOME=./models-cache/torch
+TMPDIR=./models-cache/tmp
 ```
 
 Generate a local session secret with:
@@ -120,6 +126,30 @@ Set `ENABLE_HF_MODELS=true` and install `uv sync --extra ai` to run both evaluat
 Hugging Face downloads model artifacts on the first evaluation and caches them for later runs.
 Contributed files are processed locally and are not sent to an inference API. The live progress bar
 shows model-loading and evaluation stages.
+
+The application creates these directories and exports `HF_HOME`, `HF_HUB_CACHE`,
+`TRANSFORMERS_CACHE`, `TORCH_HOME`, and the platform temporary variables before lazily importing
+Transformers or PyTorch. `MODEL_CACHE_DIR` is the fallback root when a specific variable is omitted.
+The defaults are repository-local and ignored by Git.
+
+Relative paths are resolved from the directory where the application is started. Every value also
+accepts an absolute path. For example, a Linux deployment can use:
+
+```dotenv
+MODEL_CACHE_DIR=/mnt/databounty/models
+HF_HOME=/mnt/databounty/models/huggingface
+HF_HUB_CACHE=/mnt/databounty/models/huggingface/hub
+TRANSFORMERS_CACHE=/mnt/databounty/models/huggingface/hub
+TORCH_HOME=/mnt/databounty/models/torch
+TMPDIR=/mnt/databounty/tmp
+```
+
+On Windows, forward-slash absolute paths such as `D:/ai-models/databounty` are accepted. On macOS,
+paths such as `/Users/your-name/ai-models/databounty` are accepted.
+
+Choose a writable location with enough free space before the first evaluation. Changing this value
+does not move previously downloaded checkpoints; they will be downloaded again unless moved
+manually.
 
 Set `ENABLE_HF_MODELS=false` to avoid model downloads. If a configured model is unavailable or
 fails, the contribution remains reviewable and receives an explicit `unsure` fallback instead of

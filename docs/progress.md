@@ -38,6 +38,9 @@ Last updated: 2026-11-15
 - Added persistent evaluation percentage/stage fields, an authenticated polling endpoint, and a responsive live progress bar.
 - Attempted Qwen3-VL replacement, then stopped its 4.3 GB download and restored CLIP at the owner's request.
 - Added cross-platform fresh-clone deployment, Fuji contract, and AI configuration instructions to `README.md`.
+- Added explicit `MODEL_CACHE_DIR`, `HF_HOME`, `HF_HUB_CACHE`, `TRANSFORMERS_CACHE`, `TORCH_HOME`,
+  and `TMPDIR` configuration before lazy AI-library imports; both evaluators also receive the Hub
+  cache directly.
 
 ## Files changed
 
@@ -65,6 +68,9 @@ Last updated: 2026-11-15
 - Existing SQLite database was migrated additively with `evaluation_progress` and `evaluation_stage`.
 - Rollback verification: Ruff and mypy pass, both JavaScript syntax checks pass, `19 passed`, and live CLIP inference returned 40% (`unsure/standard`).
 - The partial Qwen cache (1.5 GB) and Qwen-only `torchvision` dependency were removed.
+- Configurable model-cache verification: Ruff and mypy pass, both JavaScript syntax checks pass, and `21 passed`, including explicit Transformers `cache_dir` routing.
+- Process-level cache verification exported the configured absolute Hugging Face, Transformers,
+  PyTorch, and cross-OS temporary paths from a fresh settings load.
 - `forge test`: 4 passed, including 256 fuzz cases.
 - Local Anvil deployment succeeded; token and escrow bytecode deployed and Python getter call matched the contract ABI.
 - Real text-model check returned a structured `unsure`/`standard` result with a 61% relevance explanation; the caller remains the decision-maker.
@@ -77,6 +83,8 @@ Last updated: 2026-11-15
 - AI implementation status: text and image Hugging Face adapters are implemented; a real text-model inference has been verified.
 - Current runtime status: `ENABLE_HF_MODELS=true`; model loading is cached per process and failures still produce the explicit deterministic `unsure` fallback.
 - Text model is `Horizon-Labs/multilingual-zeroshot-small` (Apache-2.0); image model is CLIP for research/demo use.
+- Model checkpoints and temporary files default to ignored `./models-cache` subdirectories and may
+  be redirected independently through `.env`.
 - AI recommendations never trigger payment; the caller makes the final decision.
 - Fuji token and escrow addresses are configured; live funding for call 1 is confirmed.
 

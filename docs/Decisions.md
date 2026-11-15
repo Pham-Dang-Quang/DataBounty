@@ -35,6 +35,10 @@ cached local adapters. Models are optional at runtime, never control payouts, an
 explicit `unsure` result. CLIP is a hackathon/research choice that must be benchmarked or replaced
 before real deployment.
 
+Store downloaded checkpoints under owner-configurable cache paths instead of an implicit user-profile
+cache. `MODEL_CACHE_DIR` supplies defaults for `HF_HOME`, `HF_HUB_CACHE`, `TRANSFORMERS_CACHE`,
+`TORCH_HOME`, and `TMPDIR`; the repository-local defaults are ignored by Git.
+
 ### Minimal live evaluation progress
 
 Store a percentage and short stage on each contribution and poll an authenticated JSON endpoint.

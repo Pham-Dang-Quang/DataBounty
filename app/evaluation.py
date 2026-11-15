@@ -80,8 +80,12 @@ def evaluate_file(
         return _safe_fallback(path, data_type, criteria, "models disabled")
     try:
         if data_type == "text":
-            return _evaluate_text(path, criteria, settings.text_model, report)
-        return _evaluate_image(path, criteria, settings.image_model, report)
+            return _evaluate_text(
+                path, criteria, settings.text_model, report, settings.hf_hub_cache_path
+            )
+        return _evaluate_image(
+            path, criteria, settings.image_model, report, settings.hf_hub_cache_path
+        )
     except Exception as exc:
         report(90, "Model unavailable; using safe fallback")
         return _safe_fallback(path, data_type, criteria, type(exc).__name__)
@@ -92,11 +96,12 @@ def _evaluate_text(
     criteria: str,
     model_name: str,
     report: ProgressReporter | None = None,
+    cache_dir: Path | None = None,
 ) -> EvaluationResult:
     update = report or (lambda _percent, _stage: None)
     content = path.read_text(encoding="utf-8")[:4000]
     update(30, "Loading text model")
-    classifier = _model_pipeline("zero-shot-classification", model_name)
+    classifier = _model_pipeline("zero-shot-classification", model_name, cache_dir)
     update(60, "Comparing text with criteria")
     output = classifier(
         content,
@@ -117,10 +122,11 @@ def _evaluate_image(
     criteria: str,
     model_name: str,
     report: ProgressReporter | None = None,
+    cache_dir: Path | None = None,
 ) -> EvaluationResult:
     update = report or (lambda _percent, _stage: None)
     update(30, "Loading image model")
-    classifier = _model_pipeline("zero-shot-image-classification", model_name)
+    classifier = _model_pipeline("zero-shot-image-classification", model_name, cache_dir)
     update(60, "Comparing image with criteria")
     output = classifier(str(path), candidate_labels=[criteria[:200], "unrelated or unusable image"])
     relevance = next(
@@ -134,15 +140,31 @@ def _evaluate_image(
 
 
 @lru_cache(maxsize=4)
-def _model_pipeline(task: str, model_name: str) -> Any:
+def _model_pipeline(task: str, model_name: str, cache_dir: Path | None) -> Any:
     """Load each configured model once per process instead of once per contribution."""
+    pipeline = _pipeline_factory()
+    model_kwargs = {"cache_dir": str(cache_dir.resolve())} if cache_dir else None
+    if task == "zero-shot-classification":
+        return pipeline(
+            "zero-shot-classification",
+            model=model_name,
+            device=-1,
+            model_kwargs=model_kwargs,
+        )
+    if task == "zero-shot-image-classification":
+        return pipeline(
+            "zero-shot-image-classification",
+            model=model_name,
+            device=-1,
+            model_kwargs=model_kwargs,
+        )
+    raise ValueError(f"Unsupported model task: {task}")
+
+
+def _pipeline_factory() -> Any:
     from transformers import pipeline
 
-    if task == "zero-shot-classification":
-        return pipeline("zero-shot-classification", model=model_name, device=-1)
-    if task == "zero-shot-image-classification":
-        return pipeline("zero-shot-image-classification", model=model_name, device=-1)
-    raise ValueError(f"Unsupported model task: {task}")
+    return pipeline
 
 
 def _result_from_relevance(score: float, model_name: str, explanation: str) -> EvaluationResult:
