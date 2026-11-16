@@ -22,7 +22,8 @@ Implementation is approved. Complete the documented hackathon MVP in phase order
 
 ## Minimal technology stack
 
-- **Backend and AI:** Python, FastAPI, Pydantic, SQLAlchemy, and a small open-source Hugging Face model.
+- **Backend and AI:** Python, FastAPI, Pydantic, SQLAlchemy, and one hosted open-source model through
+  an OpenAI-compatible API.
 - **Frontend:** FastAPI/Jinja2 templates, plain responsive CSS, and small vanilla JavaScript ES modules.
 - **Database:** SQLite for the hackathon demo.
 - **Files:** local private upload directory for the demo.
@@ -37,13 +38,18 @@ Use English for code identifiers, API fields, logs, and documentation. Keep visi
 
 ## MVP boundaries
 
-- Support one file per contribution: an image or UTF-8 text file.
+- Support one file per contribution: an image with required companion text, or a UTF-8 CSV file.
 - A data call contains a title, description, data type, acceptance criteria, deadline, reward amount, and review mode.
 - Support manual review and AI-assisted review. Fully automatic AI payment is a later feature.
 - AI returns a recommendation, quality tier, and short explanation. The caller makes the final payout decision.
 - Store files and AI results off-chain. Store only escrow and payout events on Avalanche.
 - Use a test token on Fuji. Do not implement fiat deposits, custody, or a custom currency.
-- Use wallet-signature login. Never request or store a seed phrase or private key.
+- Use email/password login. Each account may link one Fuji wallet by signature for transactions.
+  Never request or store a seed phrase or private key.
+- Keep profiles, one-level call discussions, up to five author links, light/dark themes, and
+  English/Vietnamese UI switching minimal.
+- Keep caller review to three states: undecided, accepted, and rejected. Exact repeats of rejected
+  file content are rejected before AI evaluation.
 
 ## Core invariants
 

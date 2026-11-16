@@ -4,22 +4,23 @@
 <div class="page-heading">
   <span class="badge {{ contribution.status }}">{{ contribution.status.replace('_', ' ') }}</span>
   <h1>{{ contribution.original_filename }}</h1>
-  <p>For <a href="/calls/{{ contribution.call_id }}">{{ contribution.data_call.title }}</a></p>
+  <p><span data-i18n="for_call">For</span> <a href="/calls/{{ contribution.call_id }}">{{ contribution.data_call.title }}</a></p>
 </div>
 
 <div class="two-column">
   <section class="panel">
-    <h2>Submitted data</h2>
+    <h2 data-i18n="submitted_data">Submitted data</h2>
     {% if contribution.media_type.startswith('image/') %}
       <img class="preview" src="/contributions/{{ contribution.id }}/file" alt="Submitted contribution">
+      {% if contribution.companion_text %}<div class="submitted-text"><strong data-i18n="companion_text">Text label or description</strong><p>{{ contribution.companion_text }}</p></div>{% endif %}
     {% else %}
-      <a class="button secondary" href="/contributions/{{ contribution.id }}/file">Download text file</a>
+      <a class="button secondary" href="/contributions/{{ contribution.id }}/file" data-i18n="download_csv">Download CSV file</a>
     {% endif %}
     <p class="muted">{{ contribution.media_type }} · {{ contribution.size_bytes }} bytes · SHA-256 {{ contribution.sha256[:12] }}…</p>
   </section>
 
   <section class="panel">
-    <h2>AI recommendation</h2>
+    <h2 data-i18n="ai_recommendation">AI recommendation</h2>
     {% if contribution.status == 'evaluating' %}
       <div class="evaluation-progress" data-evaluation-progress
         data-endpoint="/api/contributions/{{ contribution.id }}/evaluation">
@@ -35,15 +36,15 @@
       <p>{{ contribution.ai_explanation }}</p>
       <p class="muted">Evaluator: {{ contribution.model_name }}</p>
     {% else %}
-      <p>This call uses manual review.</p>
+      <p data-i18n="manual_review_call">This call uses manual review.</p>
     {% endif %}
 
     {% if user.id == contribution.data_call.caller_id and contribution.status in ['ready_for_review', 'evaluation_error'] %}
     <form method="post" action="/contributions/{{ contribution.id }}/decision" class="decision-form">
-      <label>Reward tier<select name="tier"><option value="standard">Standard</option>{% if contribution.data_call.high_reward %}<option value="high">High</option>{% endif %}</select></label>
+      <label><span data-i18n="reward_tier">Reward tier</span><select name="tier"><option value="standard" data-i18n="standard">Standard</option>{% if contribution.data_call.high_reward %}<option value="high" data-i18n="high">High</option>{% endif %}</select></label>
       <div class="actions">
-        <button class="button" name="decision" value="accept">Accept</button>
-        <button class="button danger" name="decision" value="reject">Reject</button>
+        <button class="button" name="decision" value="accept" data-i18n="accept">Accept</button>
+        <button class="button danger" name="decision" value="reject" data-i18n="reject">Reject</button>
       </div>
     </form>
     {% endif %}

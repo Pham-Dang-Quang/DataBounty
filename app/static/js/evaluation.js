@@ -22,6 +22,7 @@ if (evaluation) {
       window.setTimeout(refreshEvaluation, 1000);
     } catch (error) {
       stage.textContent = error.message;
+      window.showErrorPopup?.(error.message);
       window.setTimeout(refreshEvaluation, 3000);
     }
   }

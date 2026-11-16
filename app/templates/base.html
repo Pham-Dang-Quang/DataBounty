@@ -1,24 +1,30 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{{ app_name }}{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', path='/css/app.css') }}">
-  <script type="module" src="{{ url_for('static', path='/js/wallet.js') }}?v=4"></script>
+  <link rel="stylesheet" href="{{ url_for('static', path='/css/app.css') }}?v=4">
+  <script>document.documentElement.dataset.theme = localStorage.getItem('theme') || 'light';</script>
+  <script type="module" src="{{ url_for('static', path='/js/ui.js') }}?v=3"></script>
+  <script type="module" src="{{ url_for('static', path='/js/wallet.js') }}?v=6"></script>
   <script type="module" src="{{ url_for('static', path='/js/evaluation.js') }}?v=1"></script>
 </head>
 <body data-chain-id="{{ chain_id }}" data-escrow="{{ escrow_address }}" data-token="{{ token_address }}"
-  data-user-wallet="{{ user.wallet_address if user else '' }}">
+  data-user-wallet="{{ linked_wallet }}">
   <header class="site-header">
     <a class="brand" href="/">{{ app_name }}</a>
     <nav>
+      <button class="link-button" type="button" data-theme-toggle aria-label="Toggle color theme">◐</button>
+      <button class="link-button" type="button" data-language-toggle>VI</button>
       {% if user %}
-        <span class="wallet" title="{{ user.wallet_address }}">{{ user.wallet_address[:6] }}…{{ user.wallet_address[-4:] }}</span>
-        <a class="button secondary" href="/calls/new">Create call</a>
-        <button class="link-button" data-logout>Sign out</button>
+        <span class="account-name">{{ user.display_name or user.email or 'Account' }}</span>
+        <a class="link-button" href="/settings" data-i18n="settings">Settings</a>
+        <a class="button secondary" href="/calls/new" data-i18n="create_call">Create call</a>
+        <button class="link-button" data-logout data-i18n="sign_out">Sign out</button>
       {% else %}
-        <button class="button" data-wallet-login>Connect wallet</button>
+        <a class="link-button" href="/signin" data-i18n="sign_in">Sign in</a>
+        <a class="button" href="/signup" data-i18n="sign_up">Sign up</a>
       {% endif %}
     </nav>
   </header>
@@ -26,7 +32,16 @@
     <div id="wallet-message" class="notice" hidden></div>
     {% block content %}{% endblock %}
   </main>
-  <footer>Hackathon demo · Avalanche Fuji · AI recommendations require caller review</footer>
+  <footer data-i18n="footer">Avalanche Fuji · AI recommendations require caller review</footer>
+  <div id="error-popup" class="modal" hidden role="alertdialog" aria-modal="true" aria-labelledby="error-popup-title">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div id="error-popup-title" class="eyebrow" data-i18n="error">Error</div>
+        <button class="modal-close" type="button" data-error-popup-close aria-label="Dismiss error">×</button>
+      </div>
+      <p id="error-popup-message" class="modal-message"></p>
+    </div>
+  </div>
 </body>
 </html>
 

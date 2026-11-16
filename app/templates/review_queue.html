@@ -1,18 +1,23 @@
 {% extends "base.html" %}
 {% block title %}Review · {{ data_call.title }}{% endblock %}
 {% block content %}
-<div class="page-heading"><p class="eyebrow">Caller review</p><h1>{{ data_call.title }}</h1></div>
+<div class="page-heading"><p class="eyebrow" data-i18n="caller_review">Caller review</p><h1>{{ data_call.title }}</h1></div>
+<nav class="review-tabs" aria-label="Contribution review states">
+  <a class="review-tab {% if tab == 'undecided' %}active{% endif %}" href="/calls/{{ data_call.id }}/review?tab=undecided"><span data-i18n="undecided">Undecided</span> ({{ tab_counts.undecided }})</a>
+  <a class="review-tab {% if tab == 'accepted' %}active{% endif %}" href="/calls/{{ data_call.id }}/review?tab=accepted"><span data-i18n="accepted">Accepted</span> ({{ tab_counts.accepted }})</a>
+  <a class="review-tab {% if tab == 'rejected' %}active{% endif %}" href="/calls/{{ data_call.id }}/review?tab=rejected"><span data-i18n="rejected">Rejected</span> ({{ tab_counts.rejected }})</a>
+</nav>
 {% if contributions %}
 <div class="card-grid">
   {% for item in contributions %}
     <a class="card" href="/contributions/{{ item.id }}">
       <span class="badge {{ item.status }}">{{ item.status.replace('_', ' ') }}</span>
       <h3>{{ item.original_filename }}</h3>
-      <p>From {{ item.contributor.wallet_address[:6] }}…{{ item.contributor.wallet_address[-4:] }}</p>
+      <p><span data-i18n="from">From</span> {{ item.contributor.display_name or item.contributor.email or (item.contributor.wallet_address[:6] ~ '…' ~ item.contributor.wallet_address[-4:]) }}</p>
       {% if item.ai_recommendation %}<strong>AI: {{ item.ai_recommendation }} · {{ item.ai_tier }}</strong>{% endif %}
     </a>
   {% endfor %}
 </div>
-{% else %}<div class="empty">No contributions yet.</div>{% endif %}
+{% else %}<div class="empty" data-i18n="no_contributions_in_tab">No contributions in this tab.</div>{% endif %}
 {% endblock %}
 

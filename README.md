@@ -1,25 +1,27 @@
 # DataBounty
 
-DataBounty is a minimal hackathon application for requesting image or text data, receiving an AI review recommendation, and rewarding accepted contributors through an Avalanche Fuji escrow.
+DataBounty is a minimal hackathon application for requesting image-text pairs or CSV data, receiving
+an AI review recommendation, and rewarding accepted contributors through an Avalanche Fuji escrow.
 
 ## What works
 
-- Wallet-signature login
-- Create image or text data calls
+- Email/password signup and signin with a basic profile
+- One signature-linked Fuji wallet per account
+- Create image-text pair or CSV data calls
 - Private one-file contributions with validation and duplicate detection
 - Manual or AI-assisted review
 - Standard and high reward tiers
 - Caller-approved Fuji escrow payouts
 - Responsive server-rendered UI
+- Light/dark themes, English/Vietnamese switching, call discussions, and author links
 
 The caller always makes the final decision. The application does not hold private keys or fiat.
 
 ## Deploy from a fresh clone
 
-Install Python 3.12 or 3.13, [uv](https://docs.astral.sh/uv/), Foundry, and the Core wallet on
-Windows, macOS, or Linux.
-Core must use Avalanche Fuji (chain ID `43113`). Python 3.14 can run the web application only
-with the deterministic fallback because the optional PyTorch models target Python 3.12/3.13.
+Install Python 3.12 or newer, [uv](https://docs.astral.sh/uv/), Foundry, and the Core wallet on
+Windows, macOS, or Linux. Core must use Avalanche Fuji (chain ID `43113`). No local GPU, CUDA,
+PyTorch, or model download is required.
 
 ### 1. Install the application
 
@@ -29,17 +31,15 @@ Windows PowerShell:
 
 ```powershell
 Copy-Item .env.example .env
-uv sync --extra ai
+uv sync
 ```
 
 macOS/Linux shell:
 
 ```bash
 cp .env.example .env
-uv sync --extra ai
+uv sync
 ```
-
-Use `uv sync` without `--extra ai` only when AI inference will remain disabled.
 
 ### 2. Test and deploy the Fuji contracts
 
@@ -92,15 +92,11 @@ AVALANCHE_RPC_URL=https://api.avax-test.network/ext/bc/C/rpc
 CHAIN_ID=43113
 TOKEN_CONTRACT_ADDRESS=0x...
 ESCROW_CONTRACT_ADDRESS=0x...
-ENABLE_HF_MODELS=true
-TEXT_MODEL=Horizon-Labs/multilingual-zeroshot-small
-IMAGE_MODEL=openai/clip-vit-base-patch32
-MODEL_CACHE_DIR=./models-cache
-HF_HOME=./models-cache/huggingface
-HF_HUB_CACHE=./models-cache/huggingface/hub
-TRANSFORMERS_CACHE=./models-cache/huggingface/hub
-TORCH_HOME=./models-cache/torch
-TMPDIR=./models-cache/tmp
+ENABLE_AI_API=true
+AI_API_BASE_URL=https://openrouter.ai/api/v1
+AI_API_KEY=replace-with-provider-key
+AI_MODEL=qwen/qwen3-vl-8b-instruct
+AI_API_TIMEOUT_SECONDS=60
 ```
 
 Generate a local session secret with:
@@ -120,45 +116,26 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 Open `http://127.0.0.1:8000`. SQLite tables and the private upload directory are created
 automatically. For local development, add `--reload` to the command.
 
+An existing wallet-only user from an earlier DataBounty version can choose **Recover with wallet
+signature** on the sign-in page, then add an email and password in Settings. New users should use
+normal email signup and link one Fuji wallet from Settings.
+
 ## Configure AI evaluation
 
-Set `ENABLE_HF_MODELS=true` and install `uv sync --extra ai` to run both evaluators locally.
-Hugging Face downloads model artifacts on the first evaluation and caches them for later runs.
-Contributed files are processed locally and are not sent to an inference API. The live progress bar
-shows model-loading and evaluation stages.
+The default configuration calls Qwen3-VL-8B-Instruct through OpenRouter's OpenAI-compatible
+`/chat/completions` API for both image-text and CSV contributions. Create an OpenRouter key, put it in
+`.env`, and set `ENABLE_AI_API=true`. Do not commit the key. Another compatible provider can be used
+by changing `AI_API_BASE_URL` and `AI_MODEL` to that provider's values.
 
-The application creates these directories and exports `HF_HOME`, `HF_HUB_CACHE`,
-`TRANSFORMERS_CACHE`, `TORCH_HOME`, and the platform temporary variables before lazily importing
-Transformers or PyTorch. `MODEL_CACHE_DIR` is the fallback root when a specific variable is omitted.
-The defaults are repository-local and ignored by Git.
+This avoids all local checkpoint, CUDA, VRAM, and model-cache requirements. When enabled,
+contribution content and caller criteria are sent to the configured provider, so use only a provider
+whose privacy and retention terms are acceptable for the demo. The model receives explicit
+instructions to treat contributions as untrusted data, and its JSON result is validated before it is
+stored.
 
-Relative paths are resolved from the directory where the application is started. Every value also
-accepts an absolute path. For example, a Linux deployment can use:
-
-```dotenv
-MODEL_CACHE_DIR=/mnt/databounty/models
-HF_HOME=/mnt/databounty/models/huggingface
-HF_HUB_CACHE=/mnt/databounty/models/huggingface/hub
-TRANSFORMERS_CACHE=/mnt/databounty/models/huggingface/hub
-TORCH_HOME=/mnt/databounty/models/torch
-TMPDIR=/mnt/databounty/tmp
-```
-
-On Windows, forward-slash absolute paths such as `D:/ai-models/databounty` are accepted. On macOS,
-paths such as `/Users/your-name/ai-models/databounty` are accepted.
-
-Choose a writable location with enough free space before the first evaluation. Changing this value
-does not move previously downloaded checkpoints; they will be downloaded again unless moved
-manually.
-
-Set `ENABLE_HF_MODELS=false` to avoid model downloads. If a configured model is unavailable or
-fails, the contribution remains reviewable and receives an explicit `unsure` fallback instead of
-being silently accepted or rejected.
-
-The default text evaluator is the Apache-2.0 `Horizon-Labs/multilingual-zeroshot-small`. The image
-evaluator is CLIP and should be treated as a hackathon/research demonstration. The contribution
-page shows coarse live progress while background evaluation runs. Benchmark or replace either
-model before any real deployment.
+Set `ENABLE_AI_API=false` to disable external inference. Missing configuration, timeout, HTTP error,
+or invalid model output produces an explicit `unsure` recommendation and leaves the final decision
+with the caller. The live progress bar shows preparation, API waiting, and result validation stages.
 
 ## Test Python
 
@@ -174,11 +151,11 @@ again in `contracts/README.md`.
 
 ## Demo sequence
 
-1. Connect the caller wallet and create a call.
+1. Sign up as the caller, configure the profile, and link a Core wallet on Fuji.
 2. Mint demo tokens from the configured mock token contract.
 3. Fund the call; refresh after confirmation to open it.
-4. Sign in with a second wallet and upload one matching file.
-5. Return to the caller wallet, inspect the AI recommendation, and accept a tier.
+4. Sign up as a second account, link its Fuji wallet, and upload one matching file.
+5. Sign back into the caller account, inspect the AI recommendation, and accept a tier.
 6. Submit the payout and refresh after confirmation.
 7. Show the confirmed transaction and contributor token balance in the wallet/explorer.
 

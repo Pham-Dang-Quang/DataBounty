@@ -1,20 +1,24 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="hero">
-  <p class="eyebrow">AI-assisted data bounties</p>
-  <h1>Request useful data. Review it clearly. Reward it on Avalanche.</h1>
-  <p>Create a small data call, fund it on Fuji, and use transparent AI recommendations without giving AI control of funds.</p>
-  {% if user %}<a class="button" href="/calls/new">Create a data call</a>{% endif %}
+  <p class="eyebrow" data-i18n="hero_eyebrow">AI-assisted data bounties</p>
+  <h1 data-i18n="hero_title">Request useful data. Review it clearly. Reward it on Avalanche.</h1>
+  <p data-i18n="hero_text">Create a small data call, fund it on Fuji, and use transparent AI recommendations without giving AI control of funds.</p>
+  {% if user %}<a class="button" href="/calls/new" data-i18n="create_data_call">Create a data call</a>{% endif %}
 </section>
 
 {% if user and own_calls %}
 <section>
-  <h2>Your calls</h2>
+  <h2 data-i18n="your_calls">Your calls</h2>
   <div class="card-grid">
     {% for call in own_calls %}
       <a class="card" href="/calls/{{ call.id }}">
         <span class="badge {{ call.status }}">{{ call.status }}</span>
         <h3>{{ call.title }}</h3>
+        <div class="card-author">
+          {% if call.caller.profile_image %}<img class="avatar" src="/profiles/{{ call.caller.id }}/picture" alt="">{% endif %}
+          <span><span data-i18n="by">By</span> {{ call.caller.display_name or 'Account' }}</span>
+        </div>
         <p>{{ call.description }}</p>
       </a>
     {% endfor %}
@@ -23,20 +27,24 @@
 {% endif %}
 
 <section>
-  <h2>Open calls</h2>
+  <h2 data-i18n="open_calls">Open calls</h2>
   {% if calls %}
   <div class="card-grid">
     {% for call in calls %}
       <a class="card" href="/calls/{{ call.id }}">
-        <span class="badge">{{ call.data_type }}</span>
+        <span class="badge">{{ 'image-text' if call.data_type in ['image', 'image_text'] else 'CSV' }}</span>
         <h3>{{ call.title }}</h3>
+        <div class="card-author">
+          {% if call.caller.profile_image %}<img class="avatar" src="/profiles/{{ call.caller.id }}/picture" alt="">{% endif %}
+          <span><span data-i18n="by">By</span> {{ call.caller.display_name or 'Account' }}</span>
+        </div>
         <p>{{ call.description }}</p>
         <strong>{{ format_token(call.standard_reward, token_decimals) }} {{ token_symbol }} reward</strong>
       </a>
     {% endfor %}
   </div>
   {% else %}
-    <div class="empty">No funded calls are open yet.</div>
+    <div class="empty" data-i18n="no_calls">No funded calls are open yet.</div>
   {% endif %}
 </section>
 {% endblock %}

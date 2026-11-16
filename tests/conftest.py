@@ -49,7 +49,7 @@ def settings(tmp_path: Path) -> Settings:
         avalanche_rpc_url="http://127.0.0.1:1",
         escrow_contract_address="",
         token_contract_address="",
-        enable_hf_models=False,
+        enable_ai_api=False,
     )
 
 

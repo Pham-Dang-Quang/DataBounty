@@ -1,169 +1,134 @@
 from __future__ import annotations
 
-import os
 from io import BytesIO
 
+import httpx
 import pytest
 from PIL import Image
 
 from app.config import Settings
-from app.evaluation import (
-    _evaluate_image,
-    _evaluate_text,
-    _model_pipeline,
-    evaluate_file,
-    validate_upload,
-)
+from app.evaluation import _parse_model_result, evaluate_file, validate_upload
 
 
 def test_validate_image_and_text() -> None:
     image_bytes = BytesIO()
     Image.new("RGB", (20, 10), "green").save(image_bytes, format="PNG")
-    image = validate_upload(image_bytes.getvalue(), "image", "application/octet-stream")
+    image = validate_upload(image_bytes.getvalue(), "image_text", "application/octet-stream")
     assert image.media_type == "image/png"
     assert image.size_bytes > 0
 
-    text = validate_upload(b"a useful text sample", "text", "text/plain")
-    assert text.media_type == "text/plain"
-    assert len(text.sha256) == 64
+    csv_file = validate_upload(b"label,value\nsign,stop\n", "csv", "text/csv")
+    assert csv_file.media_type == "text/csv"
+    assert len(csv_file.sha256) == 64
 
 
 @pytest.mark.parametrize("content", [b"", b" \n\t", b"\xff"])
 def test_invalid_text_is_rejected(content: bytes) -> None:
     with pytest.raises(ValueError):
-        validate_upload(content, "text", "text/plain")
+        validate_upload(content, "csv", "text/csv")
 
 
-def test_text_model_result_is_structured(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-    contribution = tmp_path / "matching.txt"
-    contribution.write_text("A clear and readable red stop sign.", encoding="utf-8")
-    model_cache = tmp_path / "model-cache"
-    loaded_with: list[tuple[str, str, object]] = []
+def test_csv_rows_must_have_consistent_columns() -> None:
+    with pytest.raises(ValueError, match="same number of columns"):
+        validate_upload(b"name,value\nsign,stop,extra\n", "csv", "text/csv")
 
-    def fake_pipeline(_content, *, candidate_labels, hypothesis_template):
-        assert hypothesis_template
-        return {"labels": candidate_labels, "scores": [0.91, 0.09]}
 
-    def fake_loader(task, model_name, cache_dir):
-        loaded_with.append((task, model_name, cache_dir))
-        return fake_pipeline
+def test_hosted_model_evaluates_image(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    contribution = tmp_path / "street-sign.png"
+    Image.new("RGB", (20, 20), "blue").save(contribution)
+    captured: dict[str, object] = {}
 
-    monkeypatch.setattr("app.evaluation._model_pipeline", fake_loader)
-    result = _evaluate_text(
+    def fake_post(url, *, headers, json, timeout):
+        captured.update(url=url, headers=headers, json=json, timeout=timeout)
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", url),
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"recommendation":"accept","quality_tier":"high",'
+                            '"explanation":"The sign is clear and readable."}'
+                        }
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setattr("app.evaluation.httpx.post", fake_post)
+    result = evaluate_file(
         contribution,
+        "image_text",
         "a readable street sign",
-        "test-text-model",
-        cache_dir=model_cache,
+        Settings(
+            enable_ai_api=True,
+            ai_api_base_url="https://provider.example/v1",
+            ai_api_key="test-key",
+            ai_model="Qwen/Qwen3-VL-8B-Instruct",
+        ),
+        companion_text="A blue rectangular road sign",
     )
 
     assert result.recommendation == "accept"
     assert result.tier == "high"
-    assert result.model_name == "test-text-model"
-    assert loaded_with == [("zero-shot-classification", "test-text-model", model_cache)]
+    assert result.model_name == "Qwen/Qwen3-VL-8B-Instruct"
+    assert captured["url"] == "https://provider.example/v1/chat/completions"
+    request_body = captured["json"]
+    assert isinstance(request_body, dict)
+    user_content = request_body["messages"][1]["content"]
+    assert user_content[1]["image_url"]["url"].startswith("data:image/png;base64,")
 
 
-def test_image_model_can_reject_unrelated_input(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
-) -> None:
-    contribution = tmp_path / "unrelated.png"
-    Image.new("RGB", (20, 20), "blue").save(contribution)
-
-    def fake_pipeline(_path, *, candidate_labels):
-        return [
-            {"label": candidate_labels[1], "score": 0.9},
-            {"label": candidate_labels[0], "score": 0.1},
-        ]
-
-    monkeypatch.setattr("app.evaluation._model_pipeline", lambda *_args: fake_pipeline)
-    result = _evaluate_image(contribution, "a readable street sign", "test-image-model")
-
-    assert result.recommendation == "reject"
-    assert result.tier == "standard"
-
-
-def test_disabled_model_reports_fallback_progress(tmp_path) -> None:
+def test_hosted_model_failure_is_unsure(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     contribution = tmp_path / "sample.txt"
-    contribution.write_text("A readable sign", encoding="utf-8")
+    contribution.write_text("label,value\nsign,readable\n", encoding="utf-8")
+    updates: list[tuple[int, str]] = []
+
+    def fail(*_args, **_kwargs):
+        raise httpx.ConnectError("offline")
+
+    monkeypatch.setattr("app.evaluation.httpx.post", fail)
+    result = evaluate_file(
+        contribution,
+        "csv",
+        "a readable street sign",
+        Settings(
+            enable_ai_api=True,
+            ai_api_base_url="https://provider.example/v1",
+            ai_api_key="test-key",
+        ),
+        lambda percent, stage: updates.append((percent, stage)),
+    )
+
+    assert result.recommendation == "unsure"
+    assert result.model_name == "deterministic-fallback"
+    assert updates[-1] == (90, "AI API unavailable; using safe fallback")
+
+
+def test_disabled_api_reports_fallback_progress(tmp_path) -> None:
+    contribution = tmp_path / "sample.txt"
+    contribution.write_text("label,value\nsign,readable\n", encoding="utf-8")
     updates: list[tuple[int, str]] = []
 
     result = evaluate_file(
         contribution,
-        "text",
+        "csv",
         "a readable street sign",
-        Settings(enable_hf_models=False),
+        Settings(enable_ai_api=False),
         lambda percent, stage: updates.append((percent, stage)),
     )
 
-    assert updates == [(10, "Checking contribution"), (90, "Using safe fallback")]
+    assert updates == [
+        (10, "Checking contribution"),
+        (90, "AI API disabled; using safe fallback"),
+    ]
     assert result.model_name == "deterministic-fallback"
 
 
-def test_enabled_model_cache_environment_is_created(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
-) -> None:
-    cache_dir = tmp_path / "chosen-model-cache"
-    hf_home = cache_dir / "hf-home"
-    hf_hub = cache_dir / "hf-hub"
-    transformers_cache = cache_dir / "transformers"
-    torch_home = cache_dir / "torch"
-    temporary = cache_dir / "tmp"
-    environment_names = (
-        "HF_HOME",
-        "HF_HUB_CACHE",
-        "TRANSFORMERS_CACHE",
-        "TORCH_HOME",
-        "TMPDIR",
-        "TEMP",
-        "TMP",
+def test_non_accept_result_cannot_claim_high_tier() -> None:
+    result = _parse_model_result(
+        '{"recommendation":"reject","quality_tier":"high","explanation":"Wrong subject"}',
+        "test-model",
     )
-    for name in environment_names:
-        monkeypatch.setenv(name, "before-test")
-    settings = Settings(
-        enable_hf_models=True,
-        upload_dir=tmp_path / "uploads",
-        database_url=f"sqlite:///{(tmp_path / 'test.db').as_posix()}",
-        model_cache_dir=cache_dir,
-        hf_home=hf_home,
-        hf_hub_cache=hf_hub,
-        transformers_cache=transformers_cache,
-        torch_home=torch_home,
-        tmpdir=temporary,
-    )
-
-    settings.ensure_directories()
-
-    for directory in (
-        cache_dir,
-        hf_home,
-        hf_hub,
-        transformers_cache,
-        torch_home,
-        temporary,
-    ):
-        assert directory.is_dir()
-    assert os.environ["HF_HOME"] == str(hf_home.resolve())
-    assert os.environ["HF_HUB_CACHE"] == str(hf_hub.resolve())
-    assert os.environ["TRANSFORMERS_CACHE"] == str(transformers_cache.resolve())
-    assert os.environ["TORCH_HOME"] == str(torch_home.resolve())
-    for name in ("TMPDIR", "TEMP", "TMP"):
-        assert os.environ[name] == str(temporary.resolve())
-
-
-def test_hugging_face_pipeline_receives_configured_cache(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
-) -> None:
-    captured: dict[str, object] = {}
-
-    def fake_pipeline(task, **kwargs):
-        captured.update({"task": task, **kwargs})
-        return object()
-
-    monkeypatch.setattr("app.evaluation._pipeline_factory", lambda: fake_pipeline)
-    _model_pipeline.cache_clear()
-    try:
-        _model_pipeline("zero-shot-classification", "test-model", tmp_path)
-    finally:
-        _model_pipeline.cache_clear()
-
-    assert captured["task"] == "zero-shot-classification"
-    assert captured["model_kwargs"] == {"cache_dir": str(tmp_path.resolve())}
+    assert result.recommendation == "reject"
+    assert result.tier == "standard"

@@ -4,7 +4,8 @@ Status: Hackathon MVP
 
 ## Product
 
-The platform lets a caller request image or text data, fund a reward on Avalanche Fuji, receive contributions, use AI to review them, and pay accepted contributors from escrow.
+The platform lets a caller request image-text pairs or CSV data, fund a reward on Avalanche Fuji,
+receive contributions, use AI to review them, and pay accepted contributors from escrow.
 
 ## Users
 
@@ -15,12 +16,12 @@ The same wallet may act as both.
 
 ## Core flow
 
-1. User connects a wallet and signs in.
+1. User creates an account with email/password and optionally links a Fuji wallet by signature.
 2. Caller creates a data call.
 3. Caller may edit or remove the unfunded draft.
 4. Caller funds the call’s escrow with the demo ERC-20 token.
 5. The call becomes open after funding is confirmed.
-6. Contributor uploads one image or text file.
+6. Contributor uploads one image plus required companion text, or one UTF-8 CSV file.
 7. The platform performs basic validation and, if enabled, asks the AI model to evaluate the file against the caller’s criteria.
 8. Caller sees the file, validation result, AI recommendation, quality tier, and explanation.
 9. Caller accepts or rejects the contribution.
@@ -30,7 +31,7 @@ The same wallet may act as both.
 ## Data call fields
 
 - Title and short description
-- Data type: image or text
+- Data type: image-text pair or CSV
 - Plain-language acceptance criteria
 - Review mode: manual or AI-assisted
 - Reward amount per accepted contribution
@@ -48,19 +49,30 @@ AI-assisted review returns structured output:
 - quality tier: standard or high;
 - short explanation.
 
-Basic deterministic checks run first: allowed type, non-empty file, size limit, readable content, and exact duplicate within the call. “Unsure” requires caller judgment. The caller always makes the final decision and can disagree with AI.
+Basic deterministic checks run first: allowed type, non-empty file, size limit, readable content,
+required image text, valid CSV structure, and exact duplicate content within the call. An exact repeat
+of previously rejected file content is rejected immediately without AI reevaluation. “Unsure”
+requires caller judgment. The caller always makes the final decision and can disagree with AI.
 
-Use one small open-source model suitable for the selected modality. Model choice is configuration, not product behavior.
+Use hosted `Qwen/Qwen3-VL-8B-Instruct` through a configurable OpenAI-compatible API for image-text
+and CSV review. If the API is disabled, missing, or fails, return `unsure` and require manual review.
+Do not download or run CLIP or Qwen locally.
 
 ## MVP requirements
 
 - Responsive pages for calls, call creation, contribution upload, and caller review.
 - Caller controls to edit or remove an unfunded draft.
-- Wallet-signature login.
+- Email/password signup and signin, a basic profile (name, picture, bio), and one signature-linked
+  Fuji wallet per account.
+- Light/dark themes and an English/Vietnamese interface switch stored in the browser.
+- One-level comments/replies on calls and up to five validated author/project links per call.
+- Open-call cards identify the caller by profile name/avatar; call details may also show their bio.
 - Fuji testnet and a demo ERC-20 token.
 - Escrow funding and one-time payouts.
-- Image and UTF-8 text uploads, one file per contribution.
+- Image plus required text, or UTF-8 CSV, with one uploaded file per contribution.
 - Manual and AI-assisted review.
+- Three caller-review tabs: undecided, accepted, and rejected. Only undecided items appear in the
+  review counter.
 - Clear pending, confirmed, failed, empty, and validation-error states.
 - A simple audit timeline for call funding, submission, review, and payout.
 
@@ -71,7 +83,7 @@ Use one small open-source model suitable for the selected modality. Model choice
 - Mainnet deployment
 - Fully automatic AI payouts
 - Disputes or arbitration
-- Multiple files, ZIP datasets, audio, video, or tabular datasets
+- Multiple uploaded files, ZIP datasets, audio, video, or spreadsheet formats other than CSV
 - Data resale, reputation, messaging, notifications, teams, or administration dashboards
 - Production KYC, moderation, scaling, high availability, or complex retention tooling
 - Custom Avalanche L1 or cross-chain transfers

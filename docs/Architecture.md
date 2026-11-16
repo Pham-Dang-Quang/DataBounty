@@ -10,7 +10,7 @@ One Python application provides:
 
 - Jinja2-rendered pages;
 - small JSON endpoints used by browser JavaScript;
-- wallet-signature authentication;
+- email/password sessions and signature-based wallet linking;
 - data-call and contribution logic;
 - upload validation;
 - AI evaluation;
@@ -28,14 +28,16 @@ SQLite stores users, calls, contributions, AI results, and transaction reference
 
 ### AI evaluator
 
-A Python adapter accepts the contribution, caller criteria, and data type. It returns validated structured output: recommendation, tier, and explanation. Run it outside the request path with a simple background task if inference is slow.
+A Python adapter sends the contribution, image companion text when present, caller criteria, and data type to the configured
+OpenAI-compatible API using `Qwen/Qwen3-VL-8B-Instruct`. It validates the returned recommendation,
+tier, and explanation. Run it outside the request path with a simple background task.
 
 Evaluation progress and its current stage are stored on the contribution. The contribution page
 polls one authenticated JSON endpoint while evaluation runs; no WebSocket or job-queue service is
 needed for the MVP.
 
-Before lazy model-library imports, the application exports the configured Hugging Face, Transformers,
-PyTorch, and temporary cache paths. Both adapters also receive `HF_HUB_CACHE` explicitly.
+No local checkpoint or GPU runtime is used. If the API is unavailable, evaluation becomes `unsure`
+and remains available for manual review.
 
 ### Avalanche Fuji
 
@@ -44,7 +46,7 @@ One small escrow contract holds the demo ERC-20 for calls. It records call fundi
 ## Main data flow
 
 ```text
-Browser -> FastAPI -> SQLite/local uploads -> AI evaluator
+Browser -> FastAPI -> SQLite/local uploads -> hosted AI API
    |                                      
    +---------- wallet transaction -> Fuji escrow
 ```
@@ -52,6 +54,7 @@ Browser -> FastAPI -> SQLite/local uploads -> AI evaluator
 ## Trust boundary
 
 - Files and AI results are off-chain and controlled by the application.
+- When AI review is enabled, contribution content is disclosed to the configured API provider.
 - Funds are held and transferred by the escrow contract.
 - The caller remains responsible for the final acceptance decision.
 - The hackathon app is a demonstration, not a production custody or compliance system.
@@ -72,12 +75,14 @@ Do not put uploads, AI logic, criteria interpretation, user profiles, or general
 ## Minimal security
 
 - Validate upload extension, detected type, size, and UTF-8/image readability.
+- Validate required image companion text and CSV headers/row widths.
 - Use generated storage names and never execute uploaded content.
-- Use one-time login nonces and short sessions.
+- Hash passwords with scrypt, use short sessions, and use one-time nonces for wallet linking.
 - Check ownership on every caller/contributor action.
 - Never store wallet private keys.
 - Test escrow balance conservation and duplicate payout rejection.
 
 ## Later, only if needed
 
-PostgreSQL, object storage, job queues, external model servers, mainnet, automatic payouts, disputes, and production security operations are deferred.
+PostgreSQL, object storage, job queues, local GPU inference, mainnet, automatic payouts, disputes,
+multiple wallets per account, and production security operations are deferred.

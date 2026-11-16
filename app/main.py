@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import secrets
 import uuid
 from collections.abc import Generator, Sequence
 from contextlib import asynccontextmanager
@@ -8,6 +9,7 @@ from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import urlparse
 
 from fastapi import (
     BackgroundTasks,
@@ -17,6 +19,7 @@ from fastapi import (
     Form,
     HTTPException,
     Request,
+    Response,
     UploadFile,
 )
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -28,13 +31,21 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.auth import create_challenge, verify_challenge
+from app.auth import (
+    create_challenge,
+    hash_password,
+    normalize_email,
+    verify_challenge,
+    verify_password,
+)
 from app.blockchain import BlockchainService
 from app.config import Settings, get_settings
 from app.db import Database
 from app.evaluation import evaluate_file, validate_upload
 from app.models import (
+    CallLink,
     CallStatus,
+    Comment,
     Contribution,
     ContributionStatus,
     DataCall,
@@ -44,6 +55,12 @@ from app.models import (
 )
 
 TX_HASH = re.compile(r"^0x[0-9a-fA-F]{64}$")
+UNDECIDED_STATUSES = {
+    ContributionStatus.EVALUATING,
+    ContributionStatus.READY,
+    ContributionStatus.ERROR,
+}
+ACCEPTED_STATUSES = {ContributionStatus.AWAITING_PAYOUT, ContributionStatus.PAID}
 
 
 class ChallengeRequest(BaseModel):
@@ -95,6 +112,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         db_value = context.pop("db", None)
         db_context = cast(Session | None, db_value if isinstance(db_value, Session) else None)
         user = current_user(request, db_context)
+        linked_wallet = user.wallet_address if user and user.wallet_address.startswith("0x") else ""
         base: dict[str, Any] = {
             "request": request,
             "user": user,
@@ -106,6 +124,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "token_decimals": app_settings.token_decimals,
             "explorer_url": app_settings.fuji_explorer_url.rstrip("/"),
             "max_upload_mb": app_settings.max_upload_bytes // (1024 * 1024),
+            "linked_wallet": linked_wallet,
         }
         base.update(context)
         return templates.TemplateResponse(request, name, base)
@@ -119,21 +138,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def require_user(request: Request, db: Session) -> User:
         user = current_user(request, db)
         if user is None:
-            raise HTTPException(status_code=401, detail="Connect and sign in with a wallet")
+            raise HTTPException(status_code=401, detail="Sign in to continue")
         return user
 
     @app.get("/", response_class=HTMLResponse)
     def home(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
-        calls = db.scalars(
+        user = current_user(request, db)
+        open_calls_query = (
             select(DataCall)
+            .options(selectinload(DataCall.caller))
             .where(DataCall.status == CallStatus.OPEN)
             .order_by(DataCall.created_at.desc())
-        ).all()
-        user = current_user(request, db)
+        )
+        if user:
+            open_calls_query = open_calls_query.where(DataCall.caller_id != user.id)
+        calls = db.scalars(open_calls_query).all()
         own_calls: Sequence[DataCall] = []
         if user:
             own_calls = db.scalars(
                 select(DataCall)
+                .options(selectinload(DataCall.caller))
                 .where(DataCall.caller_id == user.id)
                 .order_by(DataCall.created_at.desc())
             ).all()
@@ -143,8 +167,130 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/signup", response_class=HTMLResponse)
+    def signup_form(request: Request, db: Session = Depends(get_db)) -> Response:
+        if current_user(request, db):
+            return RedirectResponse("/", status_code=303)
+        return render(request, "auth_form.html", db=db, mode="signup")
+
+    @app.post("/signup")
+    def signup(
+        request: Request,
+        email: str = Form(),
+        password: str = Form(),
+        display_name: str = Form(),
+        db: Session = Depends(get_db),
+    ) -> RedirectResponse:
+        try:
+            normalized = normalize_email(email)
+            password_digest = hash_password(password)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        name = display_name.strip()
+        if not 2 <= len(name) <= 80:
+            raise HTTPException(status_code=422, detail="Name must contain 2 to 80 characters")
+        if db.scalar(select(User).where(User.email == normalized)):
+            raise HTTPException(status_code=409, detail="An account already uses this email")
+        user = User(
+            wallet_address=f"local:{uuid.uuid4().hex}",
+            email=normalized,
+            password_hash=password_digest,
+            display_name=name,
+        )
+        db.add(user)
+        db.commit()
+        request.session.clear()
+        request.session["user_id"] = user.id
+        return RedirectResponse("/settings", status_code=303)
+
+    @app.get("/signin", response_class=HTMLResponse)
+    def signin_form(request: Request, db: Session = Depends(get_db)) -> Response:
+        if current_user(request, db):
+            return RedirectResponse("/", status_code=303)
+        return render(request, "auth_form.html", db=db, mode="signin")
+
+    @app.post("/signin")
+    def signin(
+        request: Request,
+        email: str = Form(),
+        password: str = Form(),
+        db: Session = Depends(get_db),
+    ) -> RedirectResponse:
+        try:
+            normalized = normalize_email(email)
+        except ValueError as exc:
+            raise HTTPException(status_code=401, detail="Email or password is incorrect") from exc
+        user = db.scalar(select(User).where(User.email == normalized))
+        if user is None or not verify_password(password, user.password_hash):
+            raise HTTPException(status_code=401, detail="Email or password is incorrect")
+        request.session.clear()
+        request.session["user_id"] = user.id
+        return RedirectResponse("/", status_code=303)
+
+    @app.get("/settings", response_class=HTMLResponse)
+    def account_settings(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+        require_user(request, db)
+        return render(request, "settings.html", db=db)
+
+    @app.post("/settings")
+    async def update_account_settings(
+        request: Request,
+        email: str = Form(),
+        display_name: str = Form(),
+        bio: str = Form(""),
+        new_password: str = Form(""),
+        profile_picture: UploadFile | None = File(None),
+        db: Session = Depends(get_db),
+    ) -> RedirectResponse:
+        user = require_user(request, db)
+        try:
+            normalized_email = normalize_email(email)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        email_owner = db.scalar(
+            select(User).where(User.email == normalized_email, User.id != user.id)
+        )
+        if email_owner:
+            raise HTTPException(status_code=409, detail="An account already uses this email")
+        name = display_name.strip()
+        if not 2 <= len(name) <= 80 or len(bio.strip()) > 500:
+            raise HTTPException(status_code=422, detail="Check the name and 500-character bio")
+        user.email = normalized_email
+        user.display_name = name
+        user.bio = bio.strip() or None
+        if new_password:
+            try:
+                user.password_hash = hash_password(new_password)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if profile_picture and profile_picture.filename:
+            content = await profile_picture.read(app_settings.max_upload_bytes + 1)
+            if len(content) > app_settings.max_upload_bytes:
+                raise HTTPException(status_code=413, detail="Profile picture is too large")
+            try:
+                validated = validate_upload(content, "image", profile_picture.content_type)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            extension = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}[
+                validated.media_type
+            ]
+            filename = f"profile-{uuid.uuid4().hex}{extension}"
+            (app_settings.upload_dir / filename).write_bytes(content)
+            user.profile_image = filename
+        db.commit()
+        return RedirectResponse("/settings", status_code=303)
+
+    @app.get("/profiles/{user_id}/picture")
+    def profile_picture(user_id: int, db: Session = Depends(get_db)) -> FileResponse:
+        user = db.get(User, user_id)
+        if user is None or not user.profile_image:
+            raise HTTPException(status_code=404, detail="Profile picture not found")
+        return FileResponse(app_settings.upload_dir / user.profile_image)
+
     @app.post("/api/auth/challenge")
-    def auth_challenge(payload: ChallengeRequest, db: Session = Depends(get_db)) -> dict[str, str]:
+    def auth_challenge(
+        request: Request, payload: ChallengeRequest, db: Session = Depends(get_db)
+    ) -> dict[str, str]:
         try:
             message = create_challenge(db, payload.address, app_settings.chain_id)
         except ValueError as exc:
@@ -156,7 +302,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request, payload: VerifyRequest, db: Session = Depends(get_db)
     ) -> dict[str, str]:
         try:
-            user = verify_challenge(db, payload.message, payload.signature)
+            current = current_user(request, db)
+            user = verify_challenge(db, current, payload.message, payload.signature)
         except ValueError as exc:
             raise HTTPException(status_code=401, detail=str(exc)) from exc
         request.session.clear()
@@ -192,6 +339,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         high_reward: str = Form(""),
         max_acceptances: int = Form(),
         deadline: str = Form(),
+        links_text: str = Form(""),
         db: Session = Depends(get_db),
     ) -> RedirectResponse:
         user = require_user(request, db)
@@ -214,11 +362,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 max_acceptances,
                 parsed_deadline,
             )
+            links = parse_call_links(links_text)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
         data_call = DataCall(
             caller_id=user.id,
+            escrow_call_id=allocate_escrow_call_id(db),
             title=title.strip(),
             description=description.strip(),
             data_type=data_type,
@@ -231,7 +381,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         db.add(data_call)
         db.flush()
-        data_call.escrow_call_id = data_call.id
+        for label, url in links:
+            db.add(CallLink(call_id=data_call.id, label=label, url=url))
         db.add(Event(call_id=data_call.id, event_type="call_created", message="Call created"))
         db.commit()
         return RedirectResponse(f"/calls/{data_call.id}", status_code=303)
@@ -265,6 +416,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         high_reward: str = Form(""),
         max_acceptances: int = Form(),
         deadline: str = Form(),
+        links_text: str = Form(""),
         db: Session = Depends(get_db),
     ) -> RedirectResponse:
         user = require_user(request, db)
@@ -288,6 +440,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 max_acceptances,
                 parsed_deadline,
             )
+            links = parse_call_links(links_text)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -300,6 +453,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         data_call.high_reward = high
         data_call.max_acceptances = max_acceptances
         data_call.deadline = parsed_deadline
+        db.execute(delete(CallLink).where(CallLink.call_id == call_id))
+        for label, url in links:
+            db.add(CallLink(call_id=call_id, label=label, url=url))
         db.add(Event(call_id=call_id, event_type="call_updated", message="Draft updated"))
         db.commit()
         return RedirectResponse(f"/calls/{call_id}", status_code=303)
@@ -326,7 +482,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def call_detail(call_id: int, request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
         data_call = db.scalar(
             select(DataCall)
-            .options(selectinload(DataCall.caller), selectinload(DataCall.contributions))
+            .options(
+                selectinload(DataCall.caller),
+                selectinload(DataCall.contributions),
+                selectinload(DataCall.links),
+            )
             .where(DataCall.id == call_id)
         )
         if data_call is None:
@@ -335,7 +495,50 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         events = db.scalars(
             select(Event).where(Event.call_id == call_id).order_by(Event.created_at.desc())
         ).all()
-        return render(request, "call_detail.html", db=db, data_call=data_call, events=events)
+        comments = db.scalars(
+            select(Comment)
+            .options(
+                selectinload(Comment.author),
+                selectinload(Comment.replies).selectinload(Comment.author),
+            )
+            .where(Comment.call_id == call_id, Comment.parent_id.is_(None))
+            .order_by(Comment.created_at.asc())
+        ).all()
+        return render(
+            request,
+            "call_detail.html",
+            db=db,
+            data_call=data_call,
+            events=events,
+            comments=comments,
+            undecided_count=sum(
+                item.status in UNDECIDED_STATUSES for item in data_call.contributions
+            ),
+        )
+
+    @app.post("/calls/{call_id}/comments")
+    def add_comment(
+        call_id: int,
+        request: Request,
+        body: str = Form(),
+        parent_id: int | None = Form(None),
+        db: Session = Depends(get_db),
+    ) -> RedirectResponse:
+        user = require_user(request, db)
+        if db.get(DataCall, call_id) is None:
+            raise HTTPException(status_code=404, detail="Call not found")
+        text_body = body.strip()
+        if not 1 <= len(text_body) <= 1000:
+            raise HTTPException(status_code=422, detail="Comment must contain 1 to 1000 characters")
+        if parent_id is not None:
+            parent = db.get(Comment, parent_id)
+            if parent is None or parent.call_id != call_id or parent.parent_id is not None:
+                raise HTTPException(
+                    status_code=422, detail="Replies must target a top-level comment"
+                )
+        db.add(Comment(call_id=call_id, author_id=user.id, parent_id=parent_id, body=text_body))
+        db.commit()
+        return RedirectResponse(f"/calls/{call_id}#discussion", status_code=303)
 
     @app.post("/calls/{call_id}/funding-tx")
     def record_funding(
@@ -349,6 +552,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         validate_tx_hash(payload.tx_hash)
         if data_call.status not in (CallStatus.DRAFT, CallStatus.FUNDING):
             raise HTTPException(status_code=409, detail="Call is not waiting for funding")
+        if not user.wallet_address.startswith("0x"):
+            raise HTTPException(status_code=409, detail="Link a Fuji wallet before funding")
         sender = chain.transaction_sender(payload.tx_hash) if chain.configured else None
         if chain.configured and sender is None:
             raise HTTPException(status_code=422, detail="Funding transaction was not found on Fuji")
@@ -377,6 +582,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request,
         background_tasks: BackgroundTasks,
         contribution_file: UploadFile = File(),
+        companion_text: str = Form(""),
         db: Session = Depends(get_db),
     ) -> RedirectResponse:
         user = require_user(request, db)
@@ -396,9 +602,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-        extension = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}.get(
-            validated.media_type, ".txt"
+        clean_companion_text = companion_text.strip()
+        if data_call.data_type == "image_text" and not 1 <= len(clean_companion_text) <= 2000:
+            raise HTTPException(
+                status_code=422,
+                detail="Image-text contributions require 1 to 2000 characters of text",
+            )
+        duplicate = db.scalar(
+            select(Contribution).where(
+                Contribution.call_id == call_id,
+                Contribution.sha256 == validated.sha256,
+            )
         )
+        if duplicate is not None:
+            if duplicate.status == ContributionStatus.REJECTED:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "This data matches a previously rejected contribution and was rejected "
+                        "without AI reevaluation"
+                    ),
+                )
+            raise HTTPException(status_code=409, detail="This file was already submitted")
+
+        extension = {
+            "image/jpeg": ".jpg",
+            "image/png": ".png",
+            "image/webp": ".webp",
+            "text/csv": ".csv",
+        }.get(validated.media_type, ".bin")
         stored_filename = f"{uuid.uuid4().hex}{extension}"
         path = app_settings.upload_dir / stored_filename
         path.write_bytes(content)
@@ -410,6 +642,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             sha256=validated.sha256,
             media_type=validated.media_type,
             size_bytes=validated.size_bytes,
+            companion_text=clean_companion_text or None,
             status=(
                 ContributionStatus.EVALUATING
                 if data_call.review_mode == "ai_assisted"
@@ -448,21 +681,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return RedirectResponse(f"/contributions/{contribution.id}", status_code=303)
 
     @app.get("/calls/{call_id}/review", response_class=HTMLResponse)
-    def review_queue(call_id: int, request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+    def review_queue(
+        call_id: int,
+        request: Request,
+        tab: str = "undecided",
+        db: Session = Depends(get_db),
+    ) -> HTMLResponse:
         user = require_user(request, db)
         data_call = owned_call(db, call_id, user)
-        contributions = db.scalars(
+        if tab not in {"undecided", "accepted", "rejected"}:
+            raise HTTPException(status_code=422, detail="Review tab is invalid")
+        all_contributions = db.scalars(
             select(Contribution)
             .options(selectinload(Contribution.contributor))
             .where(Contribution.call_id == call_id)
             .order_by(Contribution.created_at.asc())
         ).all()
+        grouped = {
+            "undecided": [item for item in all_contributions if item.status in UNDECIDED_STATUSES],
+            "accepted": [item for item in all_contributions if item.status in ACCEPTED_STATUSES],
+            "rejected": [
+                item for item in all_contributions if item.status == ContributionStatus.REJECTED
+            ],
+        }
         return render(
             request,
             "review_queue.html",
             db=db,
             data_call=data_call,
-            contributions=contributions,
+            contributions=grouped[tab],
+            tab=tab,
+            tab_counts={name: len(items) for name, items in grouped.items()},
         )
 
     @app.get("/contributions/{contribution_id}", response_class=HTMLResponse)
@@ -665,6 +914,7 @@ def evaluate_contribution(database: Database, settings: Settings, contribution_i
             contribution.data_call.acceptance_criteria,
             settings,
             report_progress,
+            contribution.companion_text,
         )
         contribution.ai_recommendation = result.recommendation
         contribution.ai_tier = result.tier
@@ -799,8 +1049,8 @@ def validate_call_fields(
         raise ValueError("Title must contain 3 to 120 characters")
     if not description.strip() or not criteria.strip():
         raise ValueError("Description and acceptance criteria are required")
-    if data_type not in ("image", "text"):
-        raise ValueError("Data type must be image or text")
+    if data_type not in ("image_text", "csv"):
+        raise ValueError("Data type must be image-text pairs or CSV")
     if review_mode not in ("manual", "ai_assisted"):
         raise ValueError("Review mode is invalid")
     if high is not None and high < standard:
@@ -814,6 +1064,37 @@ def validate_call_fields(
 def validate_tx_hash(value: str) -> None:
     if not TX_HASH.fullmatch(value):
         raise HTTPException(status_code=422, detail="Invalid transaction hash")
+
+
+def parse_call_links(value: str) -> list[tuple[str, str]]:
+    lines = [line.strip() for line in value.splitlines() if line.strip()]
+    if len(lines) > 5:
+        raise ValueError("A call can contain at most five links")
+    links: list[tuple[str, str]] = []
+    for line in lines:
+        label, separator, raw_url = line.partition("|")
+        if not separator:
+            raw_url = label
+            label = urlparse(raw_url).netloc or "Link"
+        url = raw_url.strip()
+        parsed = urlparse(url)
+        clean_label = label.strip()
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("Links must use a complete http:// or https:// URL")
+        if not 1 <= len(clean_label) <= 80 or len(url) > 500:
+            raise ValueError("Link labels or URLs are too long")
+        links.append((clean_label, url))
+    return links
+
+
+def allocate_escrow_call_id(db: Session) -> int:
+    """Return an ID that remains unique even when the local SQLite database is reset."""
+    for _ in range(5):
+        candidate = secrets.randbelow(2**63 - 1) + 1
+        in_use = db.scalar(select(DataCall.id).where(DataCall.escrow_call_id == candidate))
+        if in_use is None:
+            return candidate
+    raise RuntimeError("Could not allocate a unique escrow call ID")
 
 
 def as_utc(value: datetime) -> datetime:

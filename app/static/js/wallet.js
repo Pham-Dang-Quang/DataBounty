@@ -33,6 +33,14 @@ const erc20Abi = [
 ];
 
 const escrowAbi = [
+  {type: "error", name: "CallAlreadyExists", inputs: []},
+  {type: "error", name: "CallNotFound", inputs: []},
+  {type: "error", name: "InvalidCall", inputs: []},
+  {type: "error", name: "InvalidPayout", inputs: []},
+  {type: "error", name: "NotCallOwner", inputs: []},
+  {type: "error", name: "ContributionAlreadyPaid", inputs: []},
+  {type: "error", name: "RefundTooEarly", inputs: []},
+  {type: "error", name: "TokenTransferMismatch", inputs: []},
   {type: "function", name: "fundCall", stateMutability: "nonpayable", inputs: [
     {name: "callId", type: "uint256"}, {name: "budget", type: "uint256"}, {name: "deadline", type: "uint64"},
   ], outputs: []},
@@ -44,12 +52,15 @@ const escrowAbi = [
 
 function show(message, isError = false) {
   if (!messageBox) return;
+  if (isError) {
+    window.showErrorPopup?.(message);
+  }
   messageBox.hidden = false;
   messageBox.textContent = message;
   messageBox.classList.toggle("error", isError);
 }
 
-async function wallet() {
+async function wallet(requireLinkedMatch = true) {
   if (!window.ethereum) throw new Error("Install an EVM wallet such as Core or MetaMask.");
   const client = createWalletClient({
     chain: avalancheFuji,
@@ -57,7 +68,7 @@ async function wallet() {
   });
   const [account] = await client.requestAddresses();
   const activeAccount = getAddress(account);
-  if (signedInWallet && activeAccount !== getAddress(signedInWallet)) {
+  if (requireLinkedMatch && signedInWallet && activeAccount !== getAddress(signedInWallet)) {
     throw new Error(
       `Core is using ${activeAccount}, but DataBounty is signed in as ${getAddress(signedInWallet)}. ` +
       "Sign out, select the funding account in Core, then connect again.",
@@ -93,10 +104,10 @@ async function postJson(url, body) {
   return payload;
 }
 
-document.querySelector("[data-wallet-login]")?.addEventListener("click", async () => {
+document.querySelector("[data-link-wallet]")?.addEventListener("click", async () => {
   try {
-    show("Requesting wallet signature…");
-    const {client, account} = await wallet();
+    show("Requesting a wallet-link signature…");
+    const {client, account} = await wallet(false);
     const {message} = await postJson("/api/auth/challenge", {address: account});
     const signature = await client.signMessage({account, message});
     await postJson("/api/auth/verify", {message, signature});
@@ -164,6 +175,9 @@ document.querySelector("[data-fund-call]")?.addEventListener("click", async (eve
       args: [BigInt(button.dataset.callId), budget, BigInt(button.dataset.deadline)],
       nonce,
     });
+    show("Waiting for the escrow funding transaction to confirm…");
+    const fundingReceipt = await publicClient.waitForTransactionReceipt({hash});
+    if (fundingReceipt.status !== "success") throw new Error("The escrow funding transaction failed.");
     await postJson(button.dataset.endpoint, {tx_hash: hash});
     window.location.reload();
   } catch (error) { button.disabled = false; show(error.message, true); }
@@ -180,6 +194,9 @@ document.querySelector("[data-pay-contribution]")?.addEventListener("click", asy
       account, chain: avalancheFuji, address: getAddress(escrow), abi: escrowAbi, functionName: "pay",
       args: [BigInt(button.dataset.callId), contributionKey, getAddress(button.dataset.recipient), BigInt(button.dataset.amount)],
     });
+    show("Waiting for the payout transaction to confirm…");
+    const payoutReceipt = await publicClient.waitForTransactionReceipt({hash});
+    if (payoutReceipt.status !== "success") throw new Error("The payout transaction failed.");
     await postJson(button.dataset.endpoint, {tx_hash: hash});
     window.location.reload();
   } catch (error) { button.disabled = false; show(error.message, true); }

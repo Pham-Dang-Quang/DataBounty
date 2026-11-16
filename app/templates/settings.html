@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Settings · {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-heading"><p class="eyebrow" data-i18n="account">Account</p><h1 data-i18n="settings">Settings</h1></div>
+<div class="two-column">
+  <form class="panel stack-form" method="post" action="/settings" enctype="multipart/form-data">
+    <h2 data-i18n="profile">Profile</h2>
+    {% if user.profile_image %}<img class="avatar large" src="/profiles/{{ user.id }}/picture" alt="Profile picture">{% endif %}
+    <label><span data-i18n="email">Email</span><input type="email" name="email" maxlength="320" required value="{{ user.email or '' }}" autocomplete="email"></label>
+    <label><span data-i18n="name">Name</span><input name="display_name" maxlength="80" required value="{{ user.display_name or '' }}"></label>
+    <label><span data-i18n="bio">Bio</span><textarea name="bio" maxlength="500">{{ user.bio or '' }}</textarea></label>
+    <label><span data-i18n="profile_picture">Profile picture</span><input type="file" name="profile_picture" accept="image/jpeg,image/png,image/webp"></label>
+    <label><span data-i18n="new_password">New password (optional)</span><input type="password" name="new_password" minlength="8" autocomplete="new-password"></label>
+    <button class="button" type="submit" data-i18n="save">Save</button>
+  </form>
+  <section class="panel">
+    <h2 data-i18n="wallet">Fuji wallet</h2>
+    {% if linked_wallet %}<p class="wallet">{{ linked_wallet }}</p>{% else %}<p data-i18n="no_wallet">No wallet linked.</p>{% endif %}
+    <button class="button secondary" type="button" data-link-wallet data-i18n="link_wallet">{{ 'Replace wallet' if linked_wallet else 'Link wallet' }}</button>
+    <p class="muted" data-i18n="wallet_help">One wallet can be linked to each account. Linking requires a signature but no transaction.</p>
+  </section>
+</div>
+{% endblock %}

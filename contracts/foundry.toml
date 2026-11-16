@@ -14,5 +14,5 @@ remappings = [
 ]
 
 [rpc_endpoints]
-fuji = "${AVALANCHE_RPC_URL}"
+fuji = "https://api.avax-test.network/ext/bc/C/rpc"
 

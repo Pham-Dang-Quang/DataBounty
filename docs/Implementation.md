@@ -1,6 +1,6 @@
 # Minimal Implementation Plan
 
-Status: MVP implemented; final two-wallet contribution and payout demo remains
+Status: MVP and requested scope extension implemented; final two-account payout demo remains
 
 ## Suggested repository layout
 
@@ -27,7 +27,7 @@ Create more modules only when a file becomes difficult to understand.
 ## Phase 1: local web flow
 
 - Set up FastAPI, Jinja2, SQLite, SQLAlchemy, and tests.
-- Implement wallet challenge/signature login.
+- Implement email/password accounts, profiles, and one signature-linked transaction wallet.
 - Implement call creation and listing.
 - Implement one-file contribution upload and validation.
 - Implement manual accept/reject without blockchain.
@@ -36,13 +36,14 @@ Exit: two wallets can complete the off-chain flow locally.
 
 ## Phase 2: AI assistance
 
-- Select one small open-source evaluator.
+- Configure one hosted open-source vision-language evaluator.
 - Define and validate its three-field structured output.
 - Run deterministic checks before inference.
 - Show the recommendation beside manual review controls.
 - Record model name and result.
 
-Exit: example image/text contributions produce understandable recommendations, and failures fall back to manual review.
+Exit: example image-text/CSV contributions produce understandable recommendations, and failures fall
+back to manual review.
 
 ## Phase 3: Avalanche Fuji
 
@@ -59,6 +60,8 @@ Exit: the complete demo flow transfers a test reward exactly once.
 - Add sample calls and a short demo script.
 - Run focused backend, contract, and end-to-end tests.
 - Remove unused dependencies and incomplete features.
+- Add browser-local light/dark and English/Vietnamese controls.
+- Add minimal call author links and one-level discussions.
 
 Exit: a fresh setup can reproduce the hackathon demo.
 

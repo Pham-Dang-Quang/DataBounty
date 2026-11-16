@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Sign up' if mode == 'signup' else 'Sign in' }} · {{ app_name }}{% endblock %}
+{% block content %}
+<div class="auth-shell panel">
+  <p class="eyebrow" data-i18n="account">Account</p>
+  <h1 data-i18n="{{ 'sign_up' if mode == 'signup' else 'sign_in' }}">{{ 'Sign up' if mode == 'signup' else 'Sign in' }}</h1>
+  <form method="post" action="/{{ mode }}" class="stack-form">
+    {% if mode == 'signup' %}
+      <label><span data-i18n="name">Name</span><input name="display_name" maxlength="80" required autocomplete="name"></label>
+    {% endif %}
+    <label><span data-i18n="email">Email</span><input type="email" name="email" required autocomplete="email"></label>
+    <label><span data-i18n="password">Password</span><input type="password" name="password" minlength="8" required autocomplete="{{ 'new-password' if mode == 'signup' else 'current-password' }}"></label>
+    <button class="button" type="submit" data-i18n="{{ 'sign_up' if mode == 'signup' else 'sign_in' }}">{{ 'Sign up' if mode == 'signup' else 'Sign in' }}</button>
+  </form>
+  {% if mode == 'signup' %}<p><a href="/signin" data-i18n="have_account">Already have an account?</a></p>
+  {% else %}
+    <p><a href="/signup" data-i18n="need_account">Create an account</a></p>
+    <hr>
+    <p class="muted" data-i18n="legacy_help">Existing wallet-only account from an earlier version?</p>
+    <button class="button secondary" type="button" data-link-wallet data-i18n="legacy_wallet">Recover with wallet signature</button>
+  {% endif %}
+</div>
+{% endblock %}

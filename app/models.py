@@ -34,6 +34,11 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     wallet_address: Mapped[str] = mapped_column(String(42), unique=True, index=True)
+    email: Mapped[str | None] = mapped_column(String(320), unique=True, index=True)
+    password_hash: Mapped[str | None] = mapped_column(String(300))
+    display_name: Mapped[str | None] = mapped_column(String(80))
+    bio: Mapped[str | None] = mapped_column(Text)
+    profile_image: Mapped[str | None] = mapped_column(String(80))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -69,6 +74,12 @@ class DataCall(Base):
 
     caller: Mapped[User] = relationship()
     contributions: Mapped[list[Contribution]] = relationship(back_populates="data_call")
+    links: Mapped[list[CallLink]] = relationship(
+        back_populates="data_call", cascade="all, delete-orphan"
+    )
+    comments: Mapped[list[Comment]] = relationship(
+        back_populates="data_call", cascade="all, delete-orphan"
+    )
 
     @property
     def maximum_reward(self) -> int:
@@ -91,6 +102,7 @@ class Contribution(Base):
     sha256: Mapped[str] = mapped_column(String(64))
     media_type: Mapped[str] = mapped_column(String(100))
     size_bytes: Mapped[int]
+    companion_text: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(30), default=ContributionStatus.EVALUATING)
     evaluation_progress: Mapped[int] = mapped_column(default=0, server_default="0")
     evaluation_stage: Mapped[str] = mapped_column(
@@ -121,3 +133,32 @@ class Event(Base):
     message: Mapped[str] = mapped_column(String(300))
     tx_hash: Mapped[str | None] = mapped_column(String(66))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CallLink(Base):
+    __tablename__ = "call_links"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    call_id: Mapped[int] = mapped_column(ForeignKey("data_calls.id"), index=True)
+    label: Mapped[str] = mapped_column(String(80))
+    url: Mapped[str] = mapped_column(String(500))
+
+    data_call: Mapped[DataCall] = relationship(back_populates="links")
+
+
+class Comment(Base):
+    __tablename__ = "comments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    call_id: Mapped[int] = mapped_column(ForeignKey("data_calls.id"), index=True)
+    author_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    parent_id: Mapped[int | None] = mapped_column(ForeignKey("comments.id"), index=True)
+    body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    data_call: Mapped[DataCall] = relationship(back_populates="comments")
+    author: Mapped[User] = relationship()
+    parent: Mapped[Comment | None] = relationship(
+        remote_side="Comment.id", back_populates="replies"
+    )
+    replies: Mapped[list[Comment]] = relationship(back_populates="parent")

@@ -5,24 +5,36 @@
   <span class="badge {{ data_call.status }}">{{ data_call.status }}</span>
   <h1>{{ data_call.title }}</h1>
   <p>{{ data_call.description }}</p>
+  <div class="caller-profile">
+    <div class="call-author">
+      {% if data_call.caller.profile_image %}<img class="avatar" src="/profiles/{{ data_call.caller.id }}/picture" alt="">{% endif %}
+      <span><span data-i18n="by">By</span> <strong>{{ data_call.caller.display_name or 'Account' }}</strong></span>
+    </div>
+    {% if data_call.caller.bio %}<p class="muted caller-bio">{{ data_call.caller.bio }}</p>{% endif %}
+  </div>
+  {% if data_call.links %}
+  <ul class="author-links" aria-label="Author links">
+    {% for link in data_call.links %}<li><a href="{{ link.url }}" target="_blank" rel="noopener noreferrer">{{ link.label }}</a></li>{% endfor %}
+  </ul>
+  {% endif %}
 </div>
 
 <div class="two-column">
   <section class="panel">
-    <h2>Requirements</h2>
+    <h2 data-i18n="requirements">Requirements</h2>
     <dl>
-      <dt>Type</dt><dd>{{ data_call.data_type }}</dd>
-      <dt>Review</dt><dd>{{ data_call.review_mode.replace('_', ' ') }}</dd>
-      <dt>Criteria</dt><dd>{{ data_call.acceptance_criteria }}</dd>
-      <dt>Standard reward</dt><dd>{{ format_token(data_call.standard_reward, token_decimals) }} {{ token_symbol }}</dd>
-      {% if data_call.high_reward %}<dt>High reward</dt><dd>{{ format_token(data_call.high_reward, token_decimals) }} {{ token_symbol }}</dd>{% endif %}
-      <dt>Deadline</dt><dd>{{ data_call.deadline }} UTC</dd>
+      <dt data-i18n="data_type">Type</dt><dd>{{ 'Image-Text pairs' if data_call.data_type in ['image', 'image_text'] else 'CSV' }}</dd>
+      <dt data-i18n="review_mode">Review</dt><dd>{{ data_call.review_mode.replace('_', ' ') }}</dd>
+      <dt data-i18n="criteria">Criteria</dt><dd>{{ data_call.acceptance_criteria }}</dd>
+      <dt data-i18n="standard_reward">Standard reward</dt><dd>{{ format_token(data_call.standard_reward, token_decimals) }} {{ token_symbol }}</dd>
+      {% if data_call.high_reward %}<dt data-i18n="high_reward_short">High reward</dt><dd>{{ format_token(data_call.high_reward, token_decimals) }} {{ token_symbol }}</dd>{% endif %}
+      <dt data-i18n="deadline">Deadline</dt><dd>{{ data_call.deadline }} UTC</dd>
     </dl>
   </section>
 
   <section class="panel">
     {% if user and user.id == data_call.caller_id %}
-      <h2>Caller controls</h2>
+      <h2 data-i18n="caller_controls">Caller controls</h2>
       {% if data_call.status == 'draft' %}
         <div class="actions">
           <a class="button secondary" href="/calls/{{ data_call.id }}/edit">Edit draft</a>
@@ -30,7 +42,9 @@
             <button class="button danger" type="submit">Remove draft</button>
           </form>
         </div>
-        {% if escrow_address and token_address %}
+        {% if not linked_wallet %}
+          <div class="notice warning"><span data-i18n="link_before_funding">Link a Fuji wallet in account settings before funding.</span> <a href="/settings" data-i18n="settings">Settings</a></div>
+        {% elif escrow_address and token_address %}
           <p>Fund the maximum liability of <strong>{{ format_token(data_call.required_budget, token_decimals) }} {{ token_symbol }}</strong>.</p>
           <button class="button secondary" type="button" data-mint-demo-token
             data-amount="{{ data_call.required_budget }}">Get demo {{ token_symbol }}</button>
@@ -45,17 +59,20 @@
       {% elif data_call.status == 'funding' %}
         <p>Funding was submitted. The call terms are now frozen while Fuji confirmation is pending.</p>
       {% else %}
-        <a class="button" href="/calls/{{ data_call.id }}/review">Review contributions ({{ data_call.contributions|length }})</a>
+        <a class="button" href="/calls/{{ data_call.id }}/review">Review contributions ({{ undecided_count }})</a>
       {% endif %}
     {% elif data_call.status == 'open' and user %}
-      <h2>Submit one {{ data_call.data_type }}</h2>
+      <h2><span data-i18n="submit_one">Submit one</span> {{ 'image-text pair' if data_call.data_type in ['image', 'image_text'] else 'CSV file' }}</h2>
       <form method="post" action="/calls/{{ data_call.id }}/contributions" enctype="multipart/form-data">
-        <label>File<input type="file" name="contribution_file" required {% if data_call.data_type == 'image' %}accept="image/jpeg,image/png,image/webp"{% else %}accept="text/plain,.txt"{% endif %}></label>
+        <label>File<input type="file" name="contribution_file" required {% if data_call.data_type in ['image', 'image_text'] %}accept="image/jpeg,image/png,image/webp"{% else %}accept="text/csv,.csv"{% endif %}></label>
+        {% if data_call.data_type in ['image', 'image_text'] %}
+        <label><span data-i18n="companion_text">Text label or description</span><textarea name="companion_text" maxlength="2000" required></textarea></label>
+        {% endif %}
         <p class="muted">Maximum {{ max_upload_mb }} MB. Exact duplicates are rejected.</p>
         <button class="button" type="submit">Submit contribution</button>
       </form>
     {% elif not user %}
-      <p>Connect a wallet to contribute.</p>
+      <p><a href="/signin" data-i18n="sign_in">Sign in</a> <span data-i18n="to_contribute">to contribute.</span></p>
     {% else %}
       <p>This call is not accepting contributions.</p>
     {% endif %}
@@ -63,12 +80,60 @@
 </div>
 
 <section>
-  <h2>Activity</h2>
+  <h2 data-i18n="activity">Activity</h2>
   <ol class="timeline">
   {% for event in events %}
     <li><strong>{{ event.message }}</strong><span>{{ event.created_at }}{% if event.tx_hash %} · <a href="{{ explorer_url }}/tx/{{ event.tx_hash }}" target="_blank" rel="noreferrer">transaction</a>{% endif %}</span></li>
   {% endfor %}
   </ol>
+</section>
+
+<section id="discussion" class="discussion-section">
+  <h2 data-i18n="discussion">Discussion</h2>
+  {% if user %}
+  <form class="panel stack-form" method="post" action="/calls/{{ data_call.id }}/comments">
+    <label><span data-i18n="comment">Comment</span><textarea name="body" maxlength="1000" required></textarea></label>
+    <button class="button" type="submit" data-i18n="post_comment">Post comment</button>
+  </form>
+  {% else %}
+  <p><a href="/signin" data-i18n="sign_in">Sign in</a> <span data-i18n="to_comment">to comment.</span></p>
+  {% endif %}
+
+  <div class="discussion">
+  {% for comment in comments %}
+    <article class="comment">
+      <header class="comment-header">
+        {% if comment.author.profile_image %}<img class="avatar" src="/profiles/{{ comment.author.id }}/picture" alt="">{% endif %}
+        <strong>{{ comment.author.display_name or comment.author.email or 'Account' }}</strong>
+        <time class="muted">{{ comment.created_at }}</time>
+      </header>
+      <p>{{ comment.body }}</p>
+      {% if comment.replies %}
+      <div class="reply-list">
+        {% for reply in comment.replies %}
+        <article class="comment reply">
+          <header class="comment-header">
+            {% if reply.author.profile_image %}<img class="avatar" src="/profiles/{{ reply.author.id }}/picture" alt="">{% endif %}
+            <strong>{{ reply.author.display_name or reply.author.email or 'Account' }}</strong>
+            <time class="muted">{{ reply.created_at }}</time>
+          </header>
+          <p>{{ reply.body }}</p>
+        </article>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if user %}
+      <form class="reply-form" method="post" action="/calls/{{ data_call.id }}/comments">
+        <input type="hidden" name="parent_id" value="{{ comment.id }}">
+        <input name="body" maxlength="1000" required aria-label="Reply" placeholder="Reply">
+        <button class="button secondary" type="submit" data-i18n="reply">Reply</button>
+      </form>
+      {% endif %}
+    </article>
+  {% else %}
+    <p class="muted" data-i18n="no_comments">No comments yet.</p>
+  {% endfor %}
+  </div>
 </section>
 {% endblock %}
 

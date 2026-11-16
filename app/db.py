@@ -18,28 +18,50 @@ class Database:
 
     def create_tables(self) -> None:
         Base.metadata.create_all(self.engine)
-        self._add_evaluation_progress_columns()
+        self._apply_additive_columns()
 
-    def _add_evaluation_progress_columns(self) -> None:
-        """Apply the two additive SQLite columns without introducing a migration framework."""
+    def _apply_additive_columns(self) -> None:
+        """Apply small SQLite additions without introducing a migration framework."""
         if self.engine.dialect.name != "sqlite":
             return
-        columns = {column["name"] for column in inspect(self.engine).get_columns("contributions")}
         statements = []
-        if "evaluation_progress" not in columns:
+        contribution_columns = {
+            column["name"] for column in inspect(self.engine).get_columns("contributions")
+        }
+        if "evaluation_progress" not in contribution_columns:
             statements.append(
                 "ALTER TABLE contributions ADD COLUMN evaluation_progress "
                 "INTEGER NOT NULL DEFAULT 0"
             )
-        if "evaluation_stage" not in columns:
+        if "evaluation_stage" not in contribution_columns:
             statements.append(
                 "ALTER TABLE contributions ADD COLUMN evaluation_stage VARCHAR(120) "
                 "NOT NULL DEFAULT 'Queued for evaluation'"
             )
+        if "companion_text" not in contribution_columns:
+            statements.append("ALTER TABLE contributions ADD COLUMN companion_text TEXT")
+        user_columns = {column["name"] for column in inspect(self.engine).get_columns("users")}
+        user_additions = {
+            "email": "VARCHAR(320)",
+            "password_hash": "VARCHAR(300)",
+            "display_name": "VARCHAR(80)",
+            "bio": "TEXT",
+            "profile_image": "VARCHAR(80)",
+        }
+        for name, column_type in user_additions.items():
+            if name not in user_columns:
+                statements.append(f"ALTER TABLE users ADD COLUMN {name} {column_type}")
         if statements:
             with self.engine.begin() as connection:
                 for statement in statements:
                     connection.execute(text(statement))
+        with self.engine.begin() as connection:
+            connection.execute(
+                text("UPDATE data_calls SET data_type = 'image_text' WHERE data_type = 'image'")
+            )
+            connection.execute(
+                text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users (email)")
+            )
 
     def sessions(self) -> Generator[Session, None, None]:
         session = self.session_factory()
