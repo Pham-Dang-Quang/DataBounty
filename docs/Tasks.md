@@ -15,14 +15,19 @@ Status: Core MVP implemented; final two-wallet contribution and payout demo rema
 - [x] Implement email/password accounts, basic profiles, and one linked transaction wallet.
 - [x] Implement create/list/view data calls.
 - [x] Implement caller-only edit/remove controls for unfunded drafts.
-- [x] Implement validated image-plus-text and UTF-8 CSV contributions.
+- [x] Implement validated image-text, typed CSV, and three-mode image-segmentation-text contributions.
 - [x] Implement caller review and manual decision.
+- [x] Add review-only moderators, reviewer attribution, rejected-data reconsideration, bulk AI
+  decisions, and accepted-only ZIP export.
+- [x] Protect undecided/rejected images with stored, versioned, heavily watermarked derivatives and
+  keep original image bytes private until confirmed payout; leave text readable.
 - [x] Add focused tests for ownership, validation, and duplicate submissions.
 
 ## 2. AI assistance
 
 - [x] Add deterministic file checks.
 - [x] Add one OpenAI-compatible hosted-model adapter with structured output.
+- [x] Reuse the hosted evaluator for CSV and one/two-image segmentation assessment with a caller prompt.
 - [x] Store and display recommendation, tier, explanation, and model name.
 - [x] Handle disabled/model errors by returning an `unsure` manual-review result.
 - [x] Test with a small synthetic example set.
@@ -43,7 +48,8 @@ Status: Core MVP implemented; final two-wallet contribution and payout demo rema
 - [x] Remove unused code and deferred UI.
 - [x] Add light/dark and English/Vietnamese browser preferences.
 - [x] Add up to five call-author links and one-level comments/replies.
-- [x] Remove duplicate owner call cards; add undecided/accepted/rejected review tabs and counts.
+- [x] Remove duplicate owner call cards; add undecided/accepted/rejected review tabs and counts,
+  with approved items staying undecided until confirmed-paid acceptance.
 - [x] Reject exact repeats of rejected data before AI evaluation.
 - [ ] Complete the full demo with two wallets.
 

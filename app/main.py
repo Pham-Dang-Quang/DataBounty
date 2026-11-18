@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import csv
+import hashlib
 import re
 import secrets
 import uuid
+import zipfile
 from collections.abc import Generator, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
+from io import BytesIO, StringIO
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlparse
@@ -22,13 +26,16 @@ from fastapi import (
     Response,
     UploadFile,
 )
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.auth import (
@@ -41,9 +48,17 @@ from app.auth import (
 from app.blockchain import BlockchainService
 from app.config import Settings, get_settings
 from app.db import Database
-from app.evaluation import evaluate_file, validate_upload
+from app.evaluation import (
+    CSV_DELIMITERS,
+    evaluate_file,
+    parse_csv_columns_spec,
+    validate_csv_requirements,
+    validate_segmentation_mask,
+    validate_upload,
+)
 from app.models import (
     CallLink,
+    CallModerator,
     CallStatus,
     Comment,
     Contribution,
@@ -55,12 +70,87 @@ from app.models import (
 )
 
 TX_HASH = re.compile(r"^0x[0-9a-fA-F]{64}$")
-UNDECIDED_STATUSES = {
+REVIEWABLE_STATUSES = {
     ContributionStatus.EVALUATING,
     ContributionStatus.READY,
     ContributionStatus.ERROR,
 }
-ACCEPTED_STATUSES = {ContributionStatus.AWAITING_PAYOUT, ContributionStatus.PAID}
+UNDECIDED_STATUSES = REVIEWABLE_STATUSES | {ContributionStatus.AWAITING_PAYOUT}
+ACCEPTED_STATUSES = {ContributionStatus.PAID}
+
+
+def apply_review_watermark(image: Image.Image, contribution_id: int) -> Image.Image:
+    base = image.convert("RGBA")
+    shortest_side = max(1, min(base.size))
+    font_size = max(16, min(36, shortest_side // 10))
+    font = ImageFont.load_default(size=font_size)
+    label = f"REVIEW ONLY - NOT ACCEPTED - ID {contribution_id}"
+    overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    watermark = ImageDraw.Draw(overlay)
+    left, top, right, bottom = watermark.textbbox((0, 0), label, font=font, stroke_width=1)
+    text_width = int(right - left)
+    text_height = int(bottom - top)
+    band_height = text_height + 18
+    band_gap = max(150, base.height // 2)
+    repeat_width = text_width + 36
+    for index, y in enumerate(range(-band_height, base.height + band_gap, band_gap)):
+        watermark.rectangle((0, y, base.width, y + band_height), fill=(115, 0, 0, 55))
+        start_x = -(repeat_width // 2) if index % 2 else 8
+        for x in range(start_x, base.width + repeat_width, repeat_width):
+            watermark.text(
+                (x, y + 8),
+                label,
+                font=font,
+                fill=(255, 255, 255, 190),
+                stroke_width=1,
+                stroke_fill=(40, 0, 0, 255),
+            )
+    diagonal_width = max(7, base.width // 65)
+    for x in range(-base.height, base.width + base.height, max(95, base.width // 4)):
+        watermark.line(
+            (x, 0, x + base.height, base.height),
+            fill=(215, 0, 0, 28),
+            width=diagonal_width,
+        )
+    combined = Image.alpha_composite(base, overlay)
+    banner_height = max(30, min(54, base.height // 7))
+    banner = ImageDraw.Draw(combined)
+    banner.rectangle(
+        (0, base.height - banner_height, base.width, base.height), fill=(120, 0, 0, 105)
+    )
+    banner.text(
+        (10, base.height - banner_height + 7),
+        label,
+        font=font,
+        fill=(255, 255, 255, 210),
+        stroke_width=1,
+        stroke_fill=(0, 0, 0, 220),
+    )
+    return combined.convert("RGB")
+
+
+def encode_protected_preview(image: Image.Image, contribution_id: int) -> bytes:
+    image.thumbnail((480, 480), Image.Resampling.LANCZOS)
+    protected = apply_review_watermark(image, contribution_id)
+    output = BytesIO()
+    protected.save(output, format="JPEG", quality=40, optimize=True, subsampling=2)
+    return output.getvalue()
+
+
+def protected_image_preview(path: Path, contribution_id: int) -> bytes:
+    with Image.open(path) as source:
+        return encode_protected_preview(ImageOps.exif_transpose(source), contribution_id)
+
+
+def stored_protected_image(upload_dir: Path, stored_filename: str, contribution_id: int) -> Path:
+    versioned_name = f"review-v4-{Path(stored_filename).stem}-{contribution_id}.jpg"
+    target = upload_dir / versioned_name
+    if not target.is_file():
+        original = upload_dir / stored_filename
+        temporary = target.with_suffix(".tmp")
+        temporary.write_bytes(protected_image_preview(original, contribution_id))
+        temporary.replace(target)
+    return target
 
 
 class ChallengeRequest(BaseModel):
@@ -125,6 +215,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "explorer_url": app_settings.fuji_explorer_url.rstrip("/"),
             "max_upload_mb": app_settings.max_upload_bytes // (1024 * 1024),
             "linked_wallet": linked_wallet,
+            "server_error": request.session.pop("error_popup", None),
         }
         base.update(context)
         return templates.TemplateResponse(request, name, base)
@@ -283,9 +374,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/profiles/{user_id}/picture")
     def profile_picture(user_id: int, db: Session = Depends(get_db)) -> FileResponse:
         user = db.get(User, user_id)
-        if user is None or not user.profile_image:
-            raise HTTPException(status_code=404, detail="Profile picture not found")
-        return FileResponse(app_settings.upload_dir / user.profile_image)
+        if user is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        profile_path = app_settings.upload_dir / user.profile_image if user.profile_image else None
+        if profile_path is None or not profile_path.is_file():
+            return FileResponse(Path(__file__).parent / "static" / "images" / "default-avatar.svg")
+        return FileResponse(profile_path)
 
     @app.post("/api/auth/challenge")
     def auth_challenge(
@@ -340,6 +434,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         max_acceptances: int = Form(),
         deadline: str = Form(),
         links_text: str = Form(""),
+        ai_evaluation_prompt: str = Form(""),
+        csv_columns: str = Form(""),
+        csv_delimiter: str = Form("comma"),
+        csv_min_records: int = Form(1),
+        csv_max_records: int | None = Form(None),
+        csv_allow_extra_columns: bool = Form(False),
+        csv_allow_missing_values: bool = Form(False),
+        csv_unique_column: str = Form(""),
+        segmentation_mode: str = Form(""),
         db: Session = Depends(get_db),
     ) -> RedirectResponse:
         user = require_user(request, db)
@@ -361,6 +464,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 high,
                 max_acceptances,
                 parsed_deadline,
+                ai_evaluation_prompt,
+                csv_columns,
+                csv_delimiter,
+                csv_min_records,
+                csv_max_records,
+                csv_allow_extra_columns,
+                csv_allow_missing_values,
+                csv_unique_column,
+                segmentation_mode,
             )
             links = parse_call_links(links_text)
         except ValueError as exc:
@@ -373,6 +485,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             description=description.strip(),
             data_type=data_type,
             acceptance_criteria=acceptance_criteria.strip(),
+            ai_evaluation_prompt=ai_evaluation_prompt.strip() or None,
+            csv_columns=csv_columns.strip() or None,
+            csv_delimiter=csv_delimiter if data_type == "csv" else None,
+            csv_min_records=csv_min_records if data_type == "csv" else None,
+            csv_max_records=csv_max_records if data_type == "csv" else None,
+            csv_allow_extra_columns=csv_allow_extra_columns if data_type == "csv" else False,
+            csv_allow_missing_values=csv_allow_missing_values if data_type == "csv" else False,
+            csv_unique_column=csv_unique_column.strip() or None,
+            segmentation_mode=(
+                segmentation_mode if data_type == "image_segmentation_text" else None
+            ),
             review_mode=review_mode,
             standard_reward=standard,
             high_reward=high,
@@ -417,6 +540,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         max_acceptances: int = Form(),
         deadline: str = Form(),
         links_text: str = Form(""),
+        ai_evaluation_prompt: str = Form(""),
+        csv_columns: str = Form(""),
+        csv_delimiter: str = Form("comma"),
+        csv_min_records: int = Form(1),
+        csv_max_records: int | None = Form(None),
+        csv_allow_extra_columns: bool = Form(False),
+        csv_allow_missing_values: bool = Form(False),
+        csv_unique_column: str = Form(""),
+        segmentation_mode: str = Form(""),
         db: Session = Depends(get_db),
     ) -> RedirectResponse:
         user = require_user(request, db)
@@ -439,6 +571,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 high,
                 max_acceptances,
                 parsed_deadline,
+                ai_evaluation_prompt,
+                csv_columns,
+                csv_delimiter,
+                csv_min_records,
+                csv_max_records,
+                csv_allow_extra_columns,
+                csv_allow_missing_values,
+                csv_unique_column,
+                segmentation_mode,
             )
             links = parse_call_links(links_text)
         except ValueError as exc:
@@ -448,6 +589,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         data_call.description = description.strip()
         data_call.data_type = data_type
         data_call.acceptance_criteria = acceptance_criteria.strip()
+        data_call.ai_evaluation_prompt = ai_evaluation_prompt.strip() or None
+        data_call.csv_columns = csv_columns.strip() or None
+        data_call.csv_delimiter = csv_delimiter if data_type == "csv" else None
+        data_call.csv_min_records = csv_min_records if data_type == "csv" else None
+        data_call.csv_max_records = csv_max_records if data_type == "csv" else None
+        data_call.csv_allow_extra_columns = csv_allow_extra_columns if data_type == "csv" else False
+        data_call.csv_allow_missing_values = (
+            csv_allow_missing_values if data_type == "csv" else False
+        )
+        data_call.csv_unique_column = csv_unique_column.strip() or None
+        data_call.segmentation_mode = (
+            segmentation_mode if data_type == "image_segmentation_text" else None
+        )
         data_call.review_mode = review_mode
         data_call.standard_reward = standard
         data_call.high_reward = high
@@ -486,6 +640,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 selectinload(DataCall.caller),
                 selectinload(DataCall.contributions),
                 selectinload(DataCall.links),
+                selectinload(DataCall.moderator_links).selectinload(CallModerator.user),
             )
             .where(DataCall.id == call_id)
         )
@@ -504,6 +659,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             .where(Comment.call_id == call_id, Comment.parent_id.is_(None))
             .order_by(Comment.created_at.asc())
         ).all()
+        user = current_user(request, db)
         return render(
             request,
             "call_detail.html",
@@ -514,7 +670,73 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             undecided_count=sum(
                 item.status in UNDECIDED_STATUSES for item in data_call.contributions
             ),
+            can_review=bool(user and can_review_call(db, data_call, user)),
         )
+
+    @app.post("/calls/{call_id}/moderators")
+    def add_moderator(
+        call_id: int,
+        request: Request,
+        email: str = Form(),
+        db: Session = Depends(get_db),
+    ) -> RedirectResponse:
+        caller = require_user(request, db)
+        data_call = owned_call(db, call_id, caller)
+        try:
+            normalized = normalize_email(email)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        moderator = db.scalar(select(User).where(User.email == normalized))
+        if moderator is None:
+            raise HTTPException(status_code=404, detail="No account uses this email")
+        if moderator.id == caller.id:
+            raise HTTPException(status_code=422, detail="The caller is already a reviewer")
+        existing = db.scalar(
+            select(CallModerator).where(
+                CallModerator.call_id == call_id,
+                CallModerator.user_id == moderator.id,
+            )
+        )
+        if existing:
+            raise HTTPException(status_code=409, detail="This account is already a moderator")
+        db.add(CallModerator(call_id=call_id, user_id=moderator.id))
+        db.add(
+            Event(
+                call_id=call_id,
+                event_type="moderator_added",
+                message=f"Moderator {reviewer_name(moderator)} added",
+            )
+        )
+        db.commit()
+        return RedirectResponse(f"/calls/{data_call.id}#moderators", status_code=303)
+
+    @app.post("/calls/{call_id}/moderators/{user_id}/delete")
+    def remove_moderator(
+        call_id: int,
+        user_id: int,
+        request: Request,
+        db: Session = Depends(get_db),
+    ) -> RedirectResponse:
+        caller = require_user(request, db)
+        data_call = owned_call(db, call_id, caller)
+        link = db.scalar(
+            select(CallModerator)
+            .options(selectinload(CallModerator.user))
+            .where(CallModerator.call_id == call_id, CallModerator.user_id == user_id)
+        )
+        if link is None:
+            raise HTTPException(status_code=404, detail="Moderator not found")
+        name = reviewer_name(link.user)
+        db.delete(link)
+        db.add(
+            Event(
+                call_id=call_id,
+                event_type="moderator_removed",
+                message=f"Moderator {name} removed",
+            )
+        )
+        db.commit()
+        return RedirectResponse(f"/calls/{data_call.id}#moderators", status_code=303)
 
     @app.post("/calls/{call_id}/comments")
     def add_comment(
@@ -582,6 +804,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request,
         background_tasks: BackgroundTasks,
         contribution_file: UploadFile = File(),
+        source_image_file: UploadFile | None = File(None),
         companion_text: str = Form(""),
         db: Session = Depends(get_db),
     ) -> RedirectResponse:
@@ -603,15 +826,78 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
         clean_companion_text = companion_text.strip()
+        validation_summary: str | None = None
+        source_content: bytes | None = None
+        source_validated = None
         if data_call.data_type == "image_text" and not 1 <= len(clean_companion_text) <= 2000:
             raise HTTPException(
                 status_code=422,
                 detail="Image-text contributions require 1 to 2000 characters of text",
             )
+        if data_call.data_type == "csv":
+            try:
+                validation_summary = validate_csv_requirements(
+                    content,
+                    data_call.csv_columns or "",
+                    data_call.csv_delimiter or "comma",
+                    data_call.csv_min_records or 1,
+                    data_call.csv_max_records,
+                    data_call.csv_allow_extra_columns,
+                    data_call.csv_allow_missing_values,
+                    data_call.csv_unique_column,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if data_call.data_type == "image_segmentation_text":
+            mode = data_call.segmentation_mode
+            requires_source = mode in {"image_seg", "image_seg_text"}
+            requires_text = mode in {"seg_text", "image_seg_text"}
+            if requires_source and source_image_file is None:
+                raise HTTPException(status_code=422, detail="A source image is required")
+            if not requires_source and source_image_file is not None:
+                raise HTTPException(
+                    status_code=422, detail="This call accepts a segmentation mask and text only"
+                )
+            if requires_text and not 1 <= len(clean_companion_text) <= 2000:
+                raise HTTPException(
+                    status_code=422,
+                    detail="This segmentation package requires 1 to 2000 characters of text",
+                )
+            if not requires_text and clean_companion_text:
+                raise HTTPException(
+                    status_code=422, detail="This segmentation package does not accept text"
+                )
+            if source_image_file is not None:
+                source_content = await source_image_file.read(app_settings.max_upload_bytes + 1)
+                if len(source_content) > app_settings.max_upload_bytes:
+                    raise HTTPException(status_code=413, detail="The source image is too large")
+                try:
+                    source_validated = validate_upload(
+                        source_content, "image_text", source_image_file.content_type
+                    )
+                except ValueError as exc:
+                    raise HTTPException(status_code=422, detail=str(exc)) from exc
+            try:
+                mask_validation = validate_segmentation_mask(content, source_content)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            validation_summary = (
+                f"{mask_validation} Segmentation package structure passed for mode {mode}."
+            )
+
+        package_hash = validated.sha256
+        if data_call.data_type == "image_segmentation_text":
+            digest = hashlib.sha256()
+            digest.update(content)
+            digest.update(b"\0")
+            digest.update(source_content or b"")
+            digest.update(b"\0")
+            digest.update(clean_companion_text.encode("utf-8"))
+            package_hash = digest.hexdigest()
         duplicate = db.scalar(
             select(Contribution).where(
                 Contribution.call_id == call_id,
-                Contribution.sha256 == validated.sha256,
+                Contribution.sha256 == package_hash,
             )
         )
         if duplicate is not None:
@@ -634,15 +920,40 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         stored_filename = f"{uuid.uuid4().hex}{extension}"
         path = app_settings.upload_dir / stored_filename
         path.write_bytes(content)
+        source_path: Path | None = None
+        source_stored_filename: str | None = None
+        if source_content is not None and source_validated is not None:
+            source_extension = {
+                "image/jpeg": ".jpg",
+                "image/png": ".png",
+                "image/webp": ".webp",
+            }.get(source_validated.media_type, ".bin")
+            source_stored_filename = f"{uuid.uuid4().hex}{source_extension}"
+            source_path = app_settings.upload_dir / source_stored_filename
+            source_path.write_bytes(source_content)
         contribution = Contribution(
             call_id=call_id,
             contributor_id=user.id,
             stored_filename=stored_filename,
             original_filename=Path(contribution_file.filename or "contribution").name[:255],
-            sha256=validated.sha256,
+            sha256=package_hash,
             media_type=validated.media_type,
             size_bytes=validated.size_bytes,
             companion_text=clean_companion_text or None,
+            source_stored_filename=source_stored_filename,
+            source_original_filename=(
+                Path(source_image_file.filename or "source-image").name[:255]
+                if source_image_file is not None
+                else None
+            ),
+            source_sha256=(source_validated.sha256 if source_validated is not None else None),
+            source_media_type=(
+                source_validated.media_type if source_validated is not None else None
+            ),
+            source_size_bytes=(
+                source_validated.size_bytes if source_validated is not None else None
+            ),
+            validation_summary=validation_summary,
             status=(
                 ContributionStatus.EVALUATING
                 if data_call.review_mode == "ai_assisted"
@@ -661,6 +972,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except IntegrityError as exc:
             db.rollback()
             path.unlink(missing_ok=True)
+            if source_path is not None:
+                source_path.unlink(missing_ok=True)
             raise HTTPException(status_code=409, detail="This file was already submitted") from exc
         db.add(
             Event(
@@ -688,12 +1001,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         db: Session = Depends(get_db),
     ) -> HTMLResponse:
         user = require_user(request, db)
-        data_call = owned_call(db, call_id, user)
+        data_call = reviewable_call(db, call_id, user)
         if tab not in {"undecided", "accepted", "rejected"}:
             raise HTTPException(status_code=422, detail="Review tab is invalid")
         all_contributions = db.scalars(
             select(Contribution)
-            .options(selectinload(Contribution.contributor))
+            .options(
+                selectinload(Contribution.contributor),
+                selectinload(Contribution.reviewer),
+            )
             .where(Contribution.call_id == call_id)
             .order_by(Contribution.created_at.asc())
         ).all()
@@ -712,6 +1028,120 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             contributions=grouped[tab],
             tab=tab,
             tab_counts={name: len(items) for name, items in grouped.items()},
+            is_caller=data_call.caller_id == user.id,
+        )
+
+    @app.post("/calls/{call_id}/review/apply-ai")
+    def apply_ai_recommendations(
+        call_id: int, request: Request, db: Session = Depends(get_db)
+    ) -> RedirectResponse:
+        caller = require_user(request, db)
+        data_call = owned_call(db, call_id, caller)
+        candidates = db.scalars(
+            select(Contribution)
+            .where(
+                Contribution.call_id == call_id,
+                Contribution.status.in_(REVIEWABLE_STATUSES),
+                Contribution.ai_recommendation.in_(("accept", "reject")),
+            )
+            .order_by(Contribution.created_at.asc())
+        ).all()
+        accepted_count = int(
+            db.scalar(
+                select(func.count(Contribution.id)).where(
+                    Contribution.call_id == call_id,
+                    Contribution.final_decision == "accept",
+                )
+            )
+            or 0
+        )
+        remaining_slots = max(0, data_call.max_acceptances - accepted_count)
+        applied = 0
+        for contribution in candidates:
+            recommendation = contribution.ai_recommendation
+            if recommendation == "accept":
+                if remaining_slots == 0:
+                    continue
+                tier = (
+                    "high"
+                    if contribution.ai_tier == "high" and data_call.high_reward is not None
+                    else "standard"
+                )
+                apply_contribution_decision(db, contribution, caller, "accept", tier)
+                remaining_slots -= 1
+            else:
+                apply_contribution_decision(db, contribution, caller, "reject", "standard")
+            applied += 1
+        db.add(
+            Event(
+                call_id=call_id,
+                event_type="ai_recommendations_applied",
+                message=f"{reviewer_name(caller)} applied {applied} AI recommendation(s)",
+            )
+        )
+        db.commit()
+        return RedirectResponse(f"/calls/{call_id}/review?tab=undecided", status_code=303)
+
+    @app.get("/calls/{call_id}/accepted.zip")
+    def download_accepted_data(
+        call_id: int, request: Request, db: Session = Depends(get_db)
+    ) -> Response:
+        caller = require_user(request, db)
+        data_call = owned_call(db, call_id, caller)
+        accepted = db.scalars(
+            select(Contribution)
+            .options(selectinload(Contribution.contributor))
+            .where(
+                Contribution.call_id == call_id,
+                Contribution.status.in_(ACCEPTED_STATUSES),
+            )
+            .order_by(Contribution.id.asc())
+        ).all()
+        if not accepted:
+            raise HTTPException(status_code=404, detail="No accepted data is available")
+        archive = BytesIO()
+        manifest = StringIO(newline="")
+        writer = csv.writer(manifest)
+        writer.writerow(
+            [
+                "contribution_id",
+                "file",
+                "source_image",
+                "companion_text",
+                "quality_tier",
+                "status",
+            ]
+        )
+        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as output:
+            for item in accepted:
+                safe_name = Path(item.original_filename).name
+                archive_name = f"data/{item.id}_{safe_name}"
+                source = app_settings.upload_dir / item.stored_filename
+                if source.is_file():
+                    output.write(source, archive_name)
+                source_archive_name = ""
+                if item.source_stored_filename and item.source_original_filename:
+                    source_safe_name = Path(item.source_original_filename).name
+                    source_archive_name = f"data/{item.id}_source_{source_safe_name}"
+                    source_image = app_settings.upload_dir / item.source_stored_filename
+                    if source_image.is_file():
+                        output.write(source_image, source_archive_name)
+                writer.writerow(
+                    [
+                        item.id,
+                        archive_name,
+                        source_archive_name,
+                        item.companion_text or "",
+                        item.final_tier or "",
+                        item.status,
+                    ]
+                )
+            output.writestr("manifest.csv", manifest.getvalue().encode("utf-8-sig"))
+        filename = f"call-{data_call.id}-accepted.zip"
+        return Response(
+            content=archive.getvalue(),
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
 
     @app.get("/contributions/{contribution_id}", response_class=HTMLResponse)
@@ -721,18 +1151,71 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         user = require_user(request, db)
         contribution = db.scalar(
             select(Contribution)
-            .options(selectinload(Contribution.data_call), selectinload(Contribution.contributor))
+            .options(
+                selectinload(Contribution.data_call),
+                selectinload(Contribution.contributor),
+                selectinload(Contribution.reviewer),
+            )
             .where(Contribution.id == contribution_id)
         )
         if contribution is None:
             raise HTTPException(status_code=404, detail="Contribution not found")
-        if user.id not in (contribution.contributor_id, contribution.data_call.caller_id):
+        can_review = can_review_call(db, contribution.data_call, user)
+        if user.id != contribution.contributor_id and not can_review:
             raise HTTPException(status_code=403, detail="Not allowed to view this contribution")
         refresh_payout_state(db, contribution, chain)
-        return render(request, "contribution_detail.html", db=db, contribution=contribution)
+        return render(
+            request,
+            "contribution_detail.html",
+            db=db,
+            contribution=contribution,
+            can_review=can_review,
+            is_caller=contribution.data_call.caller_id == user.id,
+            is_contributor=contribution.contributor_id == user.id,
+            is_protected_image=(
+                contribution.contributor_id != user.id
+                and contribution.status not in ACCEPTED_STATUSES
+                and contribution.media_type.startswith("image/")
+            ),
+            is_csv_hidden=(
+                contribution.data_call.data_type == "csv"
+                and contribution.contributor_id != user.id
+                and contribution.status not in ACCEPTED_STATUSES
+            ),
+            is_source_protected=(
+                bool(contribution.source_stored_filename)
+                and contribution.contributor_id != user.id
+                and contribution.status not in ACCEPTED_STATUSES
+            ),
+        )
 
-    @app.get("/contributions/{contribution_id}/file")
-    def contribution_file(
+    def protected_image_response(
+        contribution: Contribution,
+        reviewer: User,
+        db: Session,
+        stored_filename: str | None = None,
+    ) -> FileResponse:
+        record_protected_preview_access(db, contribution, reviewer)
+        try:
+            preview_path = stored_protected_image(
+                app_settings.upload_dir,
+                stored_filename or contribution.stored_filename,
+                contribution.id,
+            )
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail="Could not create review preview") from exc
+        return FileResponse(
+            preview_path,
+            media_type="image/jpeg",
+            headers={
+                "Cache-Control": "no-store, private",
+                "Content-Disposition": "inline",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
+    @app.get("/contributions/{contribution_id}/protected-image-v4")
+    def contribution_protected_image(
         contribution_id: int, request: Request, db: Session = Depends(get_db)
     ) -> FileResponse:
         user = require_user(request, db)
@@ -743,12 +1226,110 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         if contribution is None:
             raise HTTPException(status_code=404, detail="Contribution not found")
-        if user.id not in (contribution.contributor_id, contribution.data_call.caller_id):
+        if user.id == contribution.contributor_id or not can_review_call(
+            db, contribution.data_call, user
+        ):
+            raise HTTPException(status_code=403, detail="Not allowed to read this preview")
+        if contribution.status in ACCEPTED_STATUSES or not contribution.media_type.startswith(
+            "image/"
+        ):
+            raise HTTPException(status_code=404, detail="Protected image is not available")
+        return protected_image_response(contribution, user, db)
+
+    @app.get("/contributions/{contribution_id}/file")
+    def contribution_file(
+        contribution_id: int, request: Request, db: Session = Depends(get_db)
+    ) -> Response:
+        user = require_user(request, db)
+        contribution = db.scalar(
+            select(Contribution)
+            .options(selectinload(Contribution.data_call))
+            .where(Contribution.id == contribution_id)
+        )
+        if contribution is None:
+            raise HTTPException(status_code=404, detail="Contribution not found")
+        if user.id != contribution.contributor_id and not can_review_call(
+            db, contribution.data_call, user
+        ):
             raise HTTPException(status_code=403, detail="Not allowed to read this file")
+        if (
+            contribution.data_call.data_type == "csv"
+            and user.id != contribution.contributor_id
+            and contribution.status not in ACCEPTED_STATUSES
+        ):
+            raise HTTPException(
+                status_code=403, detail="CSV contents are hidden until payment is confirmed"
+            )
+        protected_image = (
+            user.id != contribution.contributor_id
+            and contribution.status not in ACCEPTED_STATUSES
+            and contribution.media_type.startswith("image/")
+        )
+        if protected_image:
+            return protected_image_response(contribution, user, db)
         return FileResponse(
             app_settings.upload_dir / contribution.stored_filename,
             media_type=contribution.media_type,
-            filename=contribution.original_filename,
+            headers={"Cache-Control": "no-store, private", "X-Content-Type-Options": "nosniff"},
+            filename=(
+                contribution.original_filename if user.id == contribution.contributor_id else None
+            ),
+            content_disposition_type=(
+                "attachment" if user.id == contribution.contributor_id else "inline"
+            ),
+        )
+
+    @app.get("/contributions/{contribution_id}/source-protected-image-v1")
+    def contribution_protected_source_image(
+        contribution_id: int, request: Request, db: Session = Depends(get_db)
+    ) -> FileResponse:
+        user = require_user(request, db)
+        contribution = db.scalar(
+            select(Contribution)
+            .options(selectinload(Contribution.data_call))
+            .where(Contribution.id == contribution_id)
+        )
+        if contribution is None or not contribution.source_stored_filename:
+            raise HTTPException(status_code=404, detail="Source image not found")
+        if user.id == contribution.contributor_id or not can_review_call(
+            db, contribution.data_call, user
+        ):
+            raise HTTPException(status_code=403, detail="Not allowed to read this preview")
+        if contribution.status in ACCEPTED_STATUSES:
+            raise HTTPException(status_code=404, detail="Protected image is not available")
+        return protected_image_response(contribution, user, db, contribution.source_stored_filename)
+
+    @app.get("/contributions/{contribution_id}/source-file")
+    def contribution_source_file(
+        contribution_id: int, request: Request, db: Session = Depends(get_db)
+    ) -> Response:
+        user = require_user(request, db)
+        contribution = db.scalar(
+            select(Contribution)
+            .options(selectinload(Contribution.data_call))
+            .where(Contribution.id == contribution_id)
+        )
+        if contribution is None or not contribution.source_stored_filename:
+            raise HTTPException(status_code=404, detail="Source image not found")
+        can_review = can_review_call(db, contribution.data_call, user)
+        if user.id != contribution.contributor_id and not can_review:
+            raise HTTPException(status_code=403, detail="Not allowed to read this file")
+        if user.id != contribution.contributor_id and contribution.status not in ACCEPTED_STATUSES:
+            return protected_image_response(
+                contribution, user, db, contribution.source_stored_filename
+            )
+        return FileResponse(
+            app_settings.upload_dir / contribution.source_stored_filename,
+            media_type=contribution.source_media_type or "application/octet-stream",
+            headers={"Cache-Control": "no-store, private", "X-Content-Type-Options": "nosniff"},
+            filename=(
+                contribution.source_original_filename
+                if user.id == contribution.contributor_id
+                else None
+            ),
+            content_disposition_type=(
+                "attachment" if user.id == contribution.contributor_id else "inline"
+            ),
         )
 
     @app.get("/api/contributions/{contribution_id}/evaluation")
@@ -763,7 +1344,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         if contribution is None:
             raise HTTPException(status_code=404, detail="Contribution not found")
-        if user.id not in (contribution.contributor_id, contribution.data_call.caller_id):
+        if user.id != contribution.contributor_id and not can_review_call(
+            db, contribution.data_call, user
+        ):
             raise HTTPException(status_code=403, detail="Not allowed to view this evaluation")
         return {
             "status": str(contribution.status),
@@ -788,53 +1371,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         if contribution is None:
             raise HTTPException(status_code=404, detail="Contribution not found")
-        if contribution.data_call.caller_id != user.id:
-            raise HTTPException(status_code=403, detail="Only the caller can decide")
-        if contribution.status not in (
-            ContributionStatus.READY,
-            ContributionStatus.ERROR,
-        ):
-            raise HTTPException(status_code=409, detail="Contribution cannot be decided now")
-        if decision not in ("accept", "reject"):
-            raise HTTPException(status_code=422, detail="Invalid decision")
-
-        contribution.final_decision = decision
-        contribution.reviewed_at = utcnow()
-        if decision == "reject":
-            contribution.status = ContributionStatus.REJECTED
-            contribution.final_tier = None
-            contribution.reward_amount = None
-            message = "Contribution rejected by caller"
-        else:
-            if tier not in ("standard", "high"):
-                raise HTTPException(status_code=422, detail="Invalid reward tier")
-            if tier == "high" and contribution.data_call.high_reward is None:
-                raise HTTPException(status_code=422, detail="This call has no high tier")
-            accepted = db.scalar(
-                select(func.count(Contribution.id)).where(
-                    Contribution.call_id == contribution.call_id,
-                    Contribution.final_decision == "accept",
-                    Contribution.id != contribution.id,
-                )
-            )
-            if int(accepted or 0) >= contribution.data_call.max_acceptances:
-                raise HTTPException(status_code=409, detail="The acceptance limit has been reached")
-            contribution.final_tier = tier
-            contribution.reward_amount = (
-                contribution.data_call.high_reward
-                if tier == "high"
-                else contribution.data_call.standard_reward
-            )
-            contribution.status = ContributionStatus.AWAITING_PAYOUT
-            message = f"Contribution accepted at {tier} tier"
-        db.add(
-            Event(
-                call_id=contribution.call_id,
-                contribution_id=contribution.id,
-                event_type=f"contribution_{decision}",
-                message=message,
-            )
-        )
+        if not can_review_call(db, contribution.data_call, user):
+            raise HTTPException(status_code=403, detail="Only the caller or a moderator can decide")
+        apply_contribution_decision(db, contribution, user, decision, tier)
         db.commit()
         return RedirectResponse(f"/contributions/{contribution.id}", status_code=303)
 
@@ -872,23 +1411,42 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         refresh_payout_state(db, contribution, chain)
         return {"status": contribution.status}
 
-    @app.exception_handler(HTTPException)
-    async def http_error(request: Request, exc: HTTPException):
+    def error_response(request: Request, status_code: int, message: str):
         if (
             request.url.path.startswith("/api/")
             or request.headers.get("content-type") == "application/json"
+            or "text/html" not in request.headers.get("accept", "")
         ):
-            return JSONResponse(
-                {"error": {"code": exc.status_code, "message": exc.detail}}, exc.status_code
-            )
-        return templates.TemplateResponse(
-            request,
-            "error.html",
-            {"request": request, "status": exc.status_code, "message": exc.detail},
-            status_code=exc.status_code,
-        )
+            return JSONResponse({"error": {"code": status_code, "message": message}}, status_code)
+        request.session["error_popup"] = message
+        return RedirectResponse(error_return_path(request), status_code=303)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_error(request: Request, exc: StarletteHTTPException):
+        return error_response(request, exc.status_code, str(exc.detail))
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_error(request: Request, exc: RequestValidationError):
+        messages = [str(error.get("msg", "Invalid value")) for error in exc.errors()]
+        message = "Invalid request: " + "; ".join(dict.fromkeys(messages))
+        return error_response(request, 422, message)
+
+    @app.exception_handler(Exception)
+    async def unexpected_error(request: Request, _exc: Exception):
+        message = "An unexpected error occurred. Please try again."
+        return error_response(request, 500, message)
 
     return app
+
+
+def error_return_path(request: Request) -> str:
+    referer = request.headers.get("referer", "")
+    if referer:
+        parsed = urlparse(referer)
+        if parsed.netloc in {"", request.url.netloc} and parsed.path.startswith("/"):
+            query = f"?{parsed.query}" if parsed.query else ""
+            return f"{parsed.path}{query}"
+    return "/"
 
 
 def evaluate_contribution(database: Database, settings: Settings, contribution_id: int) -> None:
@@ -915,6 +1473,14 @@ def evaluate_contribution(database: Database, settings: Settings, contribution_i
             settings,
             report_progress,
             contribution.companion_text,
+            contribution.data_call.ai_evaluation_prompt,
+            (
+                settings.upload_dir / contribution.source_stored_filename
+                if contribution.source_stored_filename
+                else None
+            ),
+            contribution.data_call.segmentation_mode,
+            contribution.validation_summary,
         )
         contribution.ai_recommendation = result.recommendation
         contribution.ai_tier = result.tier
@@ -968,7 +1534,9 @@ def refresh_payout_state(db: Session, contribution: Contribution, chain: Blockch
         return
     state = chain.transaction_state(contribution.payout_tx_hash)
     call_id = contribution.data_call.escrow_call_id or contribution.call_id
-    if state.state == "confirmed" and chain.contribution_is_paid(call_id, contribution.id):
+    if state.state == "confirmed" and chain.contribution_is_paid(
+        call_id, contribution.payout_key
+    ):
         contribution.status = ContributionStatus.PAID
         db.add(
             Event(
@@ -989,6 +1557,114 @@ def owned_call(db: Session, call_id: int, user: User) -> DataCall:
     if data_call.caller_id != user.id:
         raise HTTPException(status_code=403, detail="Only the caller can perform this action")
     return data_call
+
+
+def can_review_call(db: Session, data_call: DataCall, user: User) -> bool:
+    if data_call.caller_id == user.id:
+        return True
+    moderator_id = db.scalar(
+        select(CallModerator.id).where(
+            CallModerator.call_id == data_call.id,
+            CallModerator.user_id == user.id,
+        )
+    )
+    return moderator_id is not None
+
+
+def reviewable_call(db: Session, call_id: int, user: User) -> DataCall:
+    data_call = db.get(DataCall, call_id)
+    if data_call is None:
+        raise HTTPException(status_code=404, detail="Call not found")
+    if not can_review_call(db, data_call, user):
+        raise HTTPException(status_code=403, detail="Only the caller or a moderator can review")
+    return data_call
+
+
+def reviewer_name(user: User) -> str:
+    if user.display_name:
+        return user.display_name
+    if user.wallet_address.startswith("0x"):
+        return f"{user.wallet_address[:6]}…{user.wallet_address[-4:]}"
+    return "Account"
+
+
+def record_protected_preview_access(
+    db: Session, contribution: Contribution, reviewer: User
+) -> None:
+    message = f"Protected preview viewed by {reviewer_name(reviewer)} (account {reviewer.id})"
+    existing = db.scalar(
+        select(Event.id).where(
+            Event.contribution_id == contribution.id,
+            Event.event_type == "protected_preview_viewed",
+            Event.message == message,
+        )
+    )
+    if existing is None:
+        db.add(
+            Event(
+                call_id=contribution.call_id,
+                contribution_id=contribution.id,
+                event_type="protected_preview_viewed",
+                message=message,
+            )
+        )
+        db.commit()
+
+
+def apply_contribution_decision(
+    db: Session,
+    contribution: Contribution,
+    reviewer: User,
+    decision: str,
+    tier: str,
+) -> None:
+    if decision not in {"accept", "reject"}:
+        raise HTTPException(status_code=422, detail="Invalid decision")
+    if contribution.status == ContributionStatus.REJECTED:
+        if decision != "accept":
+            raise HTTPException(status_code=409, detail="Rejected data can only be reconsidered")
+    elif contribution.status not in {ContributionStatus.READY, ContributionStatus.ERROR}:
+        raise HTTPException(status_code=409, detail="Contribution cannot be decided now")
+
+    contribution.final_decision = decision
+    contribution.reviewer_id = reviewer.id
+    contribution.reviewed_at = utcnow()
+    name = reviewer_name(reviewer)
+    if decision == "reject":
+        contribution.status = ContributionStatus.REJECTED
+        contribution.final_tier = None
+        contribution.reward_amount = None
+        message = f"Contribution rejected by {name}"
+    else:
+        if tier not in {"standard", "high"}:
+            raise HTTPException(status_code=422, detail="Invalid reward tier")
+        if tier == "high" and contribution.data_call.high_reward is None:
+            raise HTTPException(status_code=422, detail="This call has no high tier")
+        accepted = db.scalar(
+            select(func.count(Contribution.id)).where(
+                Contribution.call_id == contribution.call_id,
+                Contribution.final_decision == "accept",
+                Contribution.id != contribution.id,
+            )
+        )
+        if int(accepted or 0) >= contribution.data_call.max_acceptances:
+            raise HTTPException(status_code=409, detail="The acceptance limit has been reached")
+        contribution.final_tier = tier
+        contribution.reward_amount = (
+            contribution.data_call.high_reward
+            if tier == "high"
+            else contribution.data_call.standard_reward
+        )
+        contribution.status = ContributionStatus.AWAITING_PAYOUT
+        message = f"Contribution approved for payout at {tier} tier by {name}"
+    db.add(
+        Event(
+            call_id=contribution.call_id,
+            contribution_id=contribution.id,
+            event_type=f"contribution_{decision}",
+            message=message,
+        )
+    )
 
 
 def editable_draft(db: Session, call_id: int, user: User) -> DataCall:
@@ -1044,21 +1720,54 @@ def validate_call_fields(
     high: int | None,
     max_acceptances: int,
     deadline: datetime,
+    ai_evaluation_prompt: str = "",
+    csv_columns: str = "",
+    csv_delimiter: str = "comma",
+    csv_min_records: int = 1,
+    csv_max_records: int | None = None,
+    csv_allow_extra_columns: bool = False,
+    csv_allow_missing_values: bool = False,
+    csv_unique_column: str = "",
+    segmentation_mode: str = "",
 ) -> None:
     if not 3 <= len(title.strip()) <= 120:
         raise ValueError("Title must contain 3 to 120 characters")
     if not description.strip() or not criteria.strip():
         raise ValueError("Description and acceptance criteria are required")
-    if data_type not in ("image_text", "csv"):
-        raise ValueError("Data type must be image-text pairs or CSV")
+    if data_type not in {"image_text", "csv", "image_segmentation_text"}:
+        raise ValueError("Data type is invalid")
     if review_mode not in ("manual", "ai_assisted"):
         raise ValueError("Review mode is invalid")
     if high is not None and high < standard:
         raise ValueError("High-tier reward cannot be below the standard reward")
-    if not 1 <= max_acceptances <= 100:
-        raise ValueError("Maximum acceptances must be between 1 and 100")
+    if not 1 <= max_acceptances <= 100_000:
+        raise ValueError("Maximum acceptances must be between 1 and 100000")
     if deadline <= datetime.now(UTC):
         raise ValueError("Deadline must be in the future")
+    if len(ai_evaluation_prompt.strip()) > 3000:
+        raise ValueError("AI evaluation prompt cannot exceed 3000 characters")
+    if data_type in {"csv", "image_segmentation_text"}:
+        if review_mode != "ai_assisted":
+            raise ValueError("CSV and segmentation calls require AI-assisted review")
+        if not ai_evaluation_prompt.strip():
+            raise ValueError("A detailed AI evaluation prompt is required for this data type")
+    if data_type == "csv":
+        columns = parse_csv_columns_spec(csv_columns)
+        if csv_delimiter not in CSV_DELIMITERS:
+            raise ValueError("CSV delimiter is invalid")
+        if not 1 <= csv_min_records <= 100_000:
+            raise ValueError("CSV minimum records must be between 1 and 100000")
+        if csv_max_records is not None and not csv_min_records <= csv_max_records <= 100_000:
+            raise ValueError("CSV maximum records must be blank or between the minimum and 100000")
+        unique = csv_unique_column.strip()
+        if unique and unique not in {name for name, _value_type in columns}:
+            raise ValueError("CSV unique field must be one of the required fields")
+    if data_type == "image_segmentation_text" and segmentation_mode not in {
+        "image_seg",
+        "seg_text",
+        "image_seg_text",
+    }:
+        raise ValueError("Segmentation package mode is invalid")
 
 
 def validate_tx_hash(value: str) -> None:

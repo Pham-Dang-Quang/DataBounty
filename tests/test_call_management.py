@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 from eth_account import Account
 
-from app.models import CallLink, CallStatus, Comment, DataCall
+from app.models import CallLink, CallStatus, Comment, Contribution, DataCall
 from tests.conftest import ASGITestClient
 from tests.test_app import create_call, sign_in
 
@@ -21,6 +21,37 @@ def edited_call_data() -> dict[str, str]:
         "max_acceptances": "2",
         "deadline": (datetime.now(UTC) + timedelta(days=4)).strftime("%Y-%m-%dT%H:%M"),
     }
+
+
+def test_new_contributions_receive_unique_persistent_payout_keys(
+    client: ASGITestClient,
+) -> None:
+    database = client.app.state.database
+    with database.session_factory() as db:
+        first = Contribution(
+            call_id=999,
+            contributor_id=999,
+            stored_filename="first.png",
+            original_filename="first.png",
+            sha256="a" * 64,
+            media_type="image/png",
+            size_bytes=1,
+        )
+        second = Contribution(
+            call_id=999,
+            contributor_id=999,
+            stored_filename="second.png",
+            original_filename="second.png",
+            sha256="b" * 64,
+            media_type="image/png",
+            size_bytes=1,
+        )
+        db.add_all([first, second])
+        db.flush()
+
+        assert first.payout_key.startswith("0x")
+        assert len(first.payout_key) == 66
+        assert first.payout_key != second.payout_key
 
 
 def test_caller_can_edit_and_remove_unfunded_draft(client: ASGITestClient) -> None:
@@ -68,6 +99,26 @@ def test_caller_can_edit_and_remove_unfunded_draft(client: ASGITestClient) -> No
     removed = client.post(f"/calls/{call_id}/delete", follow_redirects=False)
     assert removed.status_code == 303
     assert client.get(f"/calls/{call_id}").status_code == 404
+
+
+def test_maximum_accepted_can_exceed_one_hundred(client: ASGITestClient) -> None:
+    caller = Account.create()
+    sign_in(client, caller.key.hex())
+    response = client.post(
+        "/calls",
+        data={**edited_call_data(), "max_acceptances": "1000"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    call_id = int(response.headers["location"].rsplit("/", 1)[-1])
+
+    with client.app.state.database.session_factory() as db:
+        data_call = db.get(DataCall, call_id)
+        assert data_call is not None
+        assert data_call.max_acceptances == 1000
+
+    form = client.get(f"/calls/{call_id}/edit")
+    assert 'name="max_acceptances" min="1" max="100000"' in form.text
 
 
 def test_funding_submission_freezes_edit_and_remove(client: ASGITestClient) -> None:

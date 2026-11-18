@@ -5,15 +5,22 @@ __pycache__/
 .pytest-*/
 .mypy_cache/
 .ruff_cache/
+.uv-cache/
 .env
 data/*.db
 data/uploads/*
 !data/uploads/.gitkeep
+data/backups/
 models-cache/
 contracts/cache/
 contracts/out/
 contracts/broadcast/
 contracts/lib/
 .tools/
+.deck-build/
+presentation-output/
+sample_data/
+pitch.md
+presentation.md
 
 

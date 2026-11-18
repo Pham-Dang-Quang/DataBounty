@@ -1,8 +1,10 @@
 {% extends "base.html" %}
+{% from "macros.html" import account_identity %}
 {% block title %}Contribution {{ contribution.id }} · {{ app_name }}{% endblock %}
 {% block content %}
 <div class="page-heading">
-  <span class="badge {{ contribution.status }}">{{ contribution.status.replace('_', ' ') }}</span>
+  {% set review_state = 'accepted' if contribution.status == 'paid' else ('rejected' if contribution.status == 'rejected' else 'undecided') %}
+  <span class="badge {{ review_state }}" data-i18n="{{ review_state }}">{{ review_state }}</span>
   <h1>{{ contribution.original_filename }}</h1>
   <p><span data-i18n="for_call">For</span> <a href="/calls/{{ contribution.call_id }}">{{ contribution.data_call.title }}</a></p>
 </div>
@@ -10,12 +12,39 @@
 <div class="two-column">
   <section class="panel">
     <h2 data-i18n="submitted_data">Submitted data</h2>
-    {% if contribution.media_type.startswith('image/') %}
-      <img class="preview" src="/contributions/{{ contribution.id }}/file" alt="Submitted contribution">
-      {% if contribution.companion_text %}<div class="submitted-text"><strong data-i18n="companion_text">Text label or description</strong><p>{{ contribution.companion_text }}</p></div>{% endif %}
-    {% else %}
-      <a class="button secondary" href="/contributions/{{ contribution.id }}/file" data-i18n="download_csv">Download CSV file</a>
+    <div {% if is_protected_image %}class="protected-review" data-protected-preview{% endif %}>
+    {% if is_protected_image %}
+      <p class="notice warning" data-i18n="protected_preview_notice">Protected low-resolution image preview. Repeated watermarks are baked into the stored derivative.</p>
     {% endif %}
+    {% if contribution.media_type.startswith('image/') %}
+      {% if contribution.data_call.data_type == 'image_segmentation_text' %}<h3>Segmentation mask</h3>{% endif %}
+      <img class="preview{% if is_protected_image %} protected-media{% endif %}"
+        src="/contributions/{{ contribution.id }}/{{ 'protected-image-v4' if is_protected_image else 'file' }}"
+        alt="Submitted contribution" draggable="false">
+      {% if contribution.companion_text %}
+      <div class="submitted-text">
+        <strong data-i18n="companion_text">Text label or description</strong>
+        <p>{{ contribution.companion_text }}</p>
+      </div>
+      {% endif %}
+      {% if contribution.source_stored_filename %}
+      <div class="submitted-text">
+        <h3>Source image</h3>
+        <img class="preview{% if is_source_protected %} protected-media{% endif %}"
+          src="/contributions/{{ contribution.id }}/{{ 'source-protected-image-v1' if is_source_protected else 'source-file' }}"
+          alt="Submitted source image" draggable="false">
+      </div>
+      {% endif %}
+    {% else %}
+      {% if is_csv_hidden %}
+      <div class="notice warning">CSV contents are hidden until payment is confirmed. Review the deterministic validation and detailed AI assessment.</div>
+      {% else %}
+      <a class="button secondary" href="/contributions/{{ contribution.id }}/file"
+        data-i18n="{{ 'download_csv' if is_contributor else 'view_csv' }}">{{ 'Download CSV file' if is_contributor else 'Open CSV for review' }}</a>
+      {% endif %}
+    {% endif %}
+    </div>
+    {% if contribution.validation_summary %}<p class="notice success"><strong>Validation:</strong> {{ contribution.validation_summary }}</p>{% endif %}
     <p class="muted">{{ contribution.media_type }} · {{ contribution.size_bytes }} bytes · SHA-256 {{ contribution.sha256[:12] }}…</p>
   </section>
 
@@ -38,22 +67,28 @@
     {% else %}
       <p data-i18n="manual_review_call">This call uses manual review.</p>
     {% endif %}
+    {% if contribution.reviewer %}<p class="muted"><span data-i18n="decided_by">Decided by</span> {{ account_identity(contribution.reviewer, true) }}</p>{% endif %}
 
-    {% if user.id == contribution.data_call.caller_id and contribution.status in ['ready_for_review', 'evaluation_error'] %}
+    {% if can_review and contribution.status in ['ready_for_review', 'evaluation_error', 'rejected'] %}
     <form method="post" action="/contributions/{{ contribution.id }}/decision" class="decision-form">
       <label><span data-i18n="reward_tier">Reward tier</span><select name="tier"><option value="standard" data-i18n="standard">Standard</option>{% if contribution.data_call.high_reward %}<option value="high" data-i18n="high">High</option>{% endif %}</select></label>
       <div class="actions">
-        <button class="button" name="decision" value="accept" data-i18n="accept">Accept</button>
-        <button class="button danger" name="decision" value="reject" data-i18n="reject">Reject</button>
+        <button class="button" name="decision" value="accept" data-i18n="approve_for_payout">Approve for payout</button>
+        {% if contribution.status != 'rejected' %}<button class="button danger" name="decision" value="reject" data-i18n="reject">Reject</button>{% endif %}
       </div>
     </form>
     {% endif %}
 
-    {% if user.id == contribution.data_call.caller_id and contribution.status == 'awaiting_payout' %}
-      {% if escrow_address %}
+    {% if is_caller and contribution.status == 'awaiting_payout' %}
+      {% if contribution.payout_tx_hash %}
+      <div class="notice" data-payout-pending>
+        <span data-i18n="payout_confirmation_pending">Payout submitted. Waiting for Fuji confirmation.</span>
+        <a href="{{ explorer_url }}/tx/{{ contribution.payout_tx_hash }}" target="_blank" rel="noreferrer">View transaction</a>
+      </div>
+      {% elif escrow_address %}
       <button class="button" data-pay-contribution
         data-call-id="{{ contribution.data_call.escrow_call_id }}"
-        data-contribution-id="{{ contribution.id }}"
+        data-contribution-key="{{ contribution.payout_key }}"
         data-recipient="{{ contribution.contributor.wallet_address }}"
         data-amount="{{ contribution.reward_amount }}"
         data-endpoint="/contributions/{{ contribution.id }}/payout-tx">Pay {{ format_token(contribution.reward_amount, token_decimals) }} {{ token_symbol }}</button>

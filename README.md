@@ -1,21 +1,39 @@
 # DataBounty
 
-DataBounty is a minimal hackathon application for requesting image-text pairs or CSV data, receiving
+DataBounty is a minimal hackathon application for requesting image-text pairs, typed CSV files, or
+image-segmentation-text packages, receiving
 an AI review recommendation, and rewarding accepted contributors through an Avalanche Fuji escrow.
 
 ## What works
 
 - Email/password signup and signin with a basic profile
 - One signature-linked Fuji wallet per account
-- Create image-text pair or CSV data calls
+- Create image-text, typed CSV, or image-segmentation-text data calls
+- Deterministic CSV schema/type/row validation before hosted AI assessment
+- Image+Segmentation, Segmentation+Text, or Image+Segmentation+Text packages
 - Private one-file contributions with validation and duplicate detection
 - Manual or AI-assisted review
+- Review-only moderators assigned by account email, with reviewer attribution
+- Bulk application of decisive AI recommendations and reconsideration of rejected data
+- Caller-only confirmed-paid-data ZIP export with a CSV manifest
 - Standard and high reward tiers
 - Caller-approved Fuji escrow payouts
 - Responsive server-rendered UI
 - Light/dark themes, English/Vietnamese switching, call discussions, and author links
 
-The caller always makes the final decision. The application does not hold private keys or fiat.
+AI never makes an unquestionable decision: the caller or an assigned moderator approves review
+outcomes, and only the caller controls payouts. The application does not hold private keys or fiat.
+
+The accepted-data ZIP includes only contributions with a confirmed payout; an approved contribution
+remains **Undecided** until that confirmation. Callers and assigned
+moderators see only reduced, recompressed, repeatedly watermarked raster previews while reviewing
+images. The application stores a separate versioned derivative and switches back to the original
+only after payout confirmation. Companion text remains readable and unwatermarked. The UI blocks
+ordinary image copy, drag, and context-menu actions and logs protected image access. A web
+application still cannot prevent OS screenshots or an external camera.
+
+CSV contents are not shown or served to callers/moderators before confirmed payment. They review
+the deterministic validation summary and the hosted model's detailed assessment instead.
 
 ## Deploy from a fresh clone
 
@@ -123,7 +141,7 @@ normal email signup and link one Fuji wallet from Settings.
 ## Configure AI evaluation
 
 The default configuration calls Qwen3-VL-8B-Instruct through OpenRouter's OpenAI-compatible
-`/chat/completions` API for both image-text and CSV contributions. Create an OpenRouter key, put it in
+`/chat/completions` API for all supported types. Create an OpenRouter key, put it in
 `.env`, and set `ENABLE_AI_API=true`. Do not commit the key. Another compatible provider can be used
 by changing `AI_API_BASE_URL` and `AI_MODEL` to that provider's values.
 
@@ -154,8 +172,10 @@ again in `contracts/README.md`.
 1. Sign up as the caller, configure the profile, and link a Core wallet on Fuji.
 2. Mint demo tokens from the configured mock token contract.
 3. Fund the call; refresh after confirmation to open it.
-4. Sign up as a second account, link its Fuji wallet, and upload one matching file.
+4. Sign up as a second account, link its Fuji wallet, and upload one matching image-text pair.
 5. Sign back into the caller account, inspect the AI recommendation, and accept a tier.
-6. Submit the payout and refresh after confirmation.
-7. Show the confirmed transaction and contributor token balance in the wallet/explorer.
+6. Optionally add registered moderator emails, apply decisive AI recommendations in bulk, and
+   download the accepted-data ZIP.
+7. Submit the payout and refresh after confirmation.
+8. Show the confirmed transaction and contributor token balance in the wallet/explorer.
 

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros.html" import account_identity %}
 {% block title %}{{ data_call.title }} · {{ app_name }}{% endblock %}
 {% block content %}
 <div class="page-heading">
@@ -7,8 +8,7 @@
   <p>{{ data_call.description }}</p>
   <div class="caller-profile">
     <div class="call-author">
-      {% if data_call.caller.profile_image %}<img class="avatar" src="/profiles/{{ data_call.caller.id }}/picture" alt="">{% endif %}
-      <span><span data-i18n="by">By</span> <strong>{{ data_call.caller.display_name or 'Account' }}</strong></span>
+      <span data-i18n="by">By</span> {{ account_identity(data_call.caller, true) }}
     </div>
     {% if data_call.caller.bio %}<p class="muted caller-bio">{{ data_call.caller.bio }}</p>{% endif %}
   </div>
@@ -23,12 +23,24 @@
   <section class="panel">
     <h2 data-i18n="requirements">Requirements</h2>
     <dl>
-      <dt data-i18n="data_type">Type</dt><dd>{{ 'Image-Text pairs' if data_call.data_type in ['image', 'image_text'] else 'CSV' }}</dd>
+      <dt data-i18n="data_type">Type</dt><dd>{% if data_call.data_type in ['image', 'image_text'] %}Image-Text pairs{% elif data_call.data_type == 'csv' %}CSV{% else %}Image-Segmentation-Text{% endif %}</dd>
       <dt data-i18n="review_mode">Review</dt><dd>{{ data_call.review_mode.replace('_', ' ') }}</dd>
       <dt data-i18n="criteria">Criteria</dt><dd>{{ data_call.acceptance_criteria }}</dd>
+      {% if data_call.ai_evaluation_prompt %}<dt data-i18n="ai_evaluation_prompt">AI evaluation prompt</dt><dd>{{ data_call.ai_evaluation_prompt }}</dd>{% endif %}
+      {% if data_call.data_type == 'csv' %}
+        <dt data-i18n="csv_fields">CSV fields</dt><dd><pre>{{ data_call.csv_columns }}</pre></dd>
+        <dt data-i18n="record_range">Record range</dt><dd>{{ data_call.csv_min_records }}–{% if data_call.csv_max_records is not none %}{{ data_call.csv_max_records }}{% else %}<span data-i18n="no_limit">No limit</span>{% endif %}</dd>
+        <dt data-i18n="csv_delimiter">Delimiter</dt><dd>{{ data_call.csv_delimiter }}</dd>
+      {% elif data_call.data_type == 'image_segmentation_text' %}
+        <dt data-i18n="required_components">Components</dt><dd>{{ data_call.segmentation_mode.replace('_', ' + ') }}</dd>
+      {% endif %}
       <dt data-i18n="standard_reward">Standard reward</dt><dd>{{ format_token(data_call.standard_reward, token_decimals) }} {{ token_symbol }}</dd>
       {% if data_call.high_reward %}<dt data-i18n="high_reward_short">High reward</dt><dd>{{ format_token(data_call.high_reward, token_decimals) }} {{ token_symbol }}</dd>{% endif %}
-      <dt data-i18n="deadline">Deadline</dt><dd>{{ data_call.deadline }} UTC</dd>
+      <dt data-i18n="deadline">Deadline</dt>
+      <dd>
+        <span>{{ data_call.deadline }} UTC</span>
+        <strong class="deadline-countdown" data-deadline-countdown="{{ unix_timestamp(data_call.deadline) }}" aria-live="polite"></strong>
+      </dd>
     </dl>
   </section>
 
@@ -61,12 +73,39 @@
       {% else %}
         <a class="button" href="/calls/{{ data_call.id }}/review">Review contributions ({{ undecided_count }})</a>
       {% endif %}
+      <div id="moderators" class="moderator-controls">
+        <h3 data-i18n="moderators">Moderators</h3>
+        <form class="inline-form" method="post" action="/calls/{{ data_call.id }}/moderators">
+          <label><span data-i18n="moderator_email">Moderator account email</span><input type="email" name="email" required></label>
+          <button class="button secondary" type="submit" data-i18n="add_moderator">Add moderator</button>
+        </form>
+        {% if data_call.moderator_links %}
+        <ul class="moderator-list">
+          {% for link in data_call.moderator_links %}
+          <li>{{ account_identity(link.user) }}<form method="post" action="/calls/{{ data_call.id }}/moderators/{{ link.user_id }}/delete"><button class="link-button" type="submit" data-i18n="remove">Remove</button></form></li>
+          {% endfor %}
+        </ul>
+        {% else %}<p class="muted" data-i18n="no_moderators">No moderators assigned.</p>{% endif %}
+      </div>
+    {% elif can_review %}
+      <h2 data-i18n="moderator_controls">Moderator controls</h2>
+      <p class="muted" data-i18n="moderator_scope">You may review data, but cannot edit, remove, fund, or pay this call.</p>
+      <a class="button" href="/calls/{{ data_call.id }}/review">Review contributions ({{ undecided_count }})</a>
     {% elif data_call.status == 'open' and user %}
-      <h2><span data-i18n="submit_one">Submit one</span> {{ 'image-text pair' if data_call.data_type in ['image', 'image_text'] else 'CSV file' }}</h2>
+      <h2><span data-i18n="submit_one">Submit one</span> {% if data_call.data_type in ['image', 'image_text'] %}image-text pair{% elif data_call.data_type == 'csv' %}CSV file{% else %}segmentation package{% endif %}</h2>
+      <p class="notice warning" data-i18n="contribution_irreversible_warning">Warning: This action cannot be reversed. A submitted contribution cannot be withdrawn.</p>
       <form method="post" action="/calls/{{ data_call.id }}/contributions" enctype="multipart/form-data">
-        <label>File<input type="file" name="contribution_file" required {% if data_call.data_type in ['image', 'image_text'] %}accept="image/jpeg,image/png,image/webp"{% else %}accept="text/csv,.csv"{% endif %}></label>
+        {% if data_call.data_type == 'csv' %}
+        <label>CSV file<input type="file" name="contribution_file" required accept="text/csv,.csv"></label>
+        {% elif data_call.data_type == 'image_segmentation_text' %}
+        <label>Segmentation mask<input type="file" name="contribution_file" required accept="image/jpeg,image/png,image/webp"><small class="muted" data-i18n="segmentation_mask_help">Use clearly separated color regions. Mild shading and anti-aliasing are allowed; photographs, heavy gradients, and complex noise are rejected. The mask and source may have different resolutions, but must have the same aspect ratio.</small></label>
+        {% if data_call.segmentation_mode in ['image_seg', 'image_seg_text'] %}<label>Source image<input type="file" name="source_image_file" required accept="image/jpeg,image/png,image/webp"></label>{% endif %}
+        {% if data_call.segmentation_mode in ['seg_text', 'image_seg_text'] %}<label><span data-i18n="companion_text">Text label or description</span><textarea name="companion_text" maxlength="2000" required></textarea></label>{% endif %}
+        {% else %}
+        <label>Image file<input type="file" name="contribution_file" required accept="image/jpeg,image/png,image/webp"></label>
         {% if data_call.data_type in ['image', 'image_text'] %}
         <label><span data-i18n="companion_text">Text label or description</span><textarea name="companion_text" maxlength="2000" required></textarea></label>
+        {% endif %}
         {% endif %}
         <p class="muted">Maximum {{ max_upload_mb }} MB. Exact duplicates are rejected.</p>
         <button class="button" type="submit">Submit contribution</button>
@@ -80,12 +119,16 @@
 </div>
 
 <section>
-  <h2 data-i18n="activity">Activity</h2>
-  <ol class="timeline">
-  {% for event in events %}
-    <li><strong>{{ event.message }}</strong><span>{{ event.created_at }}{% if event.tx_hash %} · <a href="{{ explorer_url }}/tx/{{ event.tx_hash }}" target="_blank" rel="noreferrer">transaction</a>{% endif %}</span></li>
-  {% endfor %}
-  </ol>
+  <details class="activity-dropdown">
+    <summary><span data-i18n="activity">Activity</span> <span class="activity-count">{{ events|length }}</span></summary>
+    <ol class="timeline">
+    {% for event in events %}
+      <li><strong>{{ event.message }}</strong><span>{{ event.created_at }}{% if event.tx_hash %} · <a href="{{ explorer_url }}/tx/{{ event.tx_hash }}" target="_blank" rel="noreferrer">transaction</a>{% endif %}</span></li>
+    {% else %}
+      <li class="muted" data-i18n="no_activity">No activity yet.</li>
+    {% endfor %}
+    </ol>
+  </details>
 </section>
 
 <section id="discussion" class="discussion-section">
@@ -103,8 +146,7 @@
   {% for comment in comments %}
     <article class="comment">
       <header class="comment-header">
-        {% if comment.author.profile_image %}<img class="avatar" src="/profiles/{{ comment.author.id }}/picture" alt="">{% endif %}
-        <strong>{{ comment.author.display_name or comment.author.email or 'Account' }}</strong>
+        {{ account_identity(comment.author, true) }}
         <time class="muted">{{ comment.created_at }}</time>
       </header>
       <p>{{ comment.body }}</p>
@@ -113,8 +155,7 @@
         {% for reply in comment.replies %}
         <article class="comment reply">
           <header class="comment-header">
-            {% if reply.author.profile_image %}<img class="avatar" src="/profiles/{{ reply.author.id }}/picture" alt="">{% endif %}
-            <strong>{{ reply.author.display_name or reply.author.email or 'Account' }}</strong>
+            {{ account_identity(reply.author, true) }}
             <time class="muted">{{ reply.created_at }}</time>
           </header>
           <p>{{ reply.body }}</p>

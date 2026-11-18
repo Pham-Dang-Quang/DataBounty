@@ -18,8 +18,10 @@ Status: SQLite MVP
 ## `data_calls`
 
 - `id`, `caller_id`
-- `title`, `description`, `data_type` (`image_text` or `csv`)
-- `acceptance_criteria`, `review_mode`
+- `title`, `description`, `data_type` (`image_text`, `csv`, or `image_segmentation_text`)
+- `acceptance_criteria`, `ai_evaluation_prompt`, `review_mode`
+- CSV configuration: `csv_columns`, `csv_delimiter`, record limits, extra/missing flags, unique field
+- `segmentation_mode`
 - `standard_reward`, `high_reward`
 - `max_acceptances`, `deadline`
 - `status`, `escrow_call_id`, `funding_tx_hash`
@@ -27,14 +29,18 @@ Status: SQLite MVP
 
 ## `contributions`
 
-- `id`, `call_id`, `contributor_id`
+- `id`, `call_id`, `contributor_id`, optional `reviewer_id`
 - `stored_filename`, `original_filename`, `sha256`, `media_type`, `size_bytes`
 - optional `companion_text` (required by application validation for image-text pairs)
+- optional source-image stored/original filename, hash, media type, and size for segmentation
+- optional `validation_summary`
 - `status`
 - `evaluation_progress`, `evaluation_stage`
 - `ai_recommendation`, `ai_tier`, `ai_explanation`, `model_name`
 - `final_decision`, `final_tier`, `reward_amount`
 - `payout_tx_hash`
+- `payout_key` — persistent random `bytes32` identifier used by the escrow; unlike a SQLite row ID,
+  it is not reused when demo data is deleted.
 - `created_at`, `reviewed_at`
 
 ## `events`
@@ -48,6 +54,11 @@ Status: SQLite MVP
 - `id`, `call_id`
 - `label`, `url`
 
+## `call_moderators`
+
+- `id`, `call_id`, `user_id`
+- unique pair of call and moderator account
+
 ## `comments`
 
 - `id`, `call_id`, `author_id`
@@ -59,7 +70,8 @@ Status: SQLite MVP
 - Store token amounts as integers in minor units.
 - A contribution hash is unique within a call.
 - A contribution has at most one payout transaction.
-- Only the caller may finalize a decision.
+- Only the caller or an assigned moderator may finalize an individual decision. The stored
+  `reviewer_id` identifies the latest decider.
 - Open calls must have confirmed funding.
 - `escrow_call_id` is a random positive 63-bit value and is independent of the resettable SQLite ID.
 - Only an unfunded draft may be updated or deleted; deletion also removes its draft-only events.

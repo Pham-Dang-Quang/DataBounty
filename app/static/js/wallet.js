@@ -4,8 +4,6 @@ import {
   custom,
   getAddress,
   http,
-  keccak256,
-  toHex,
 } from "https://esm.sh/viem@2";
 import { avalancheFuji } from "https://esm.sh/viem@2/chains";
 
@@ -51,10 +49,11 @@ const escrowAbi = [
 ];
 
 function show(message, isError = false) {
-  if (!messageBox) return;
   if (isError) {
     window.showErrorPopup?.(message);
+    return;
   }
+  if (!messageBox) return;
   messageBox.hidden = false;
   messageBox.textContent = message;
   messageBox.classList.toggle("error", isError);
@@ -189,7 +188,7 @@ document.querySelector("[data-pay-contribution]")?.addEventListener("click", asy
     button.disabled = true;
     const {client, account} = await wallet();
     show("Submit the payout transaction…");
-    const contributionKey = keccak256(toHex(button.dataset.contributionId));
+    const contributionKey = button.dataset.contributionKey;
     const hash = await client.writeContract({
       account, chain: avalancheFuji, address: getAddress(escrow), abi: escrowAbi, functionName: "pay",
       args: [BigInt(button.dataset.callId), contributionKey, getAddress(button.dataset.recipient), BigInt(button.dataset.amount)],

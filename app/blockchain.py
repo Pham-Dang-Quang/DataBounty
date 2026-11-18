@@ -91,6 +91,5 @@ class BlockchainService:
             and int(remaining) >= minimum_balance
         )
 
-    def contribution_is_paid(self, call_id: int, contribution_id: int) -> bool:
-        key = Web3.keccak(text=str(contribution_id))
-        return bool(self.contract.functions.paid(call_id, key).call())
+    def contribution_is_paid(self, call_id: int, payout_key: str) -> bool:
+        return bool(self.contract.functions.paid(call_id, bytes.fromhex(payout_key[2:])).call())

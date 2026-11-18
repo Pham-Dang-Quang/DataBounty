@@ -7,11 +7,36 @@
 </div>
 <form class="panel form-grid" method="post" action="{{ form_action }}">
   <label><span data-i18n="title">Title</span><input name="title" maxlength="120" required placeholder="Street trees in Ho Chi Minh City" value="{{ data_call.title if data_call else '' }}"></label>
-  <label><span data-i18n="data_type">Data type</span><select name="data_type"><option value="image_text" {% if not data_call or data_call.data_type in ['image', 'image_text'] %}selected{% endif %} data-i18n="image_text">Image-Text pairs</option><option value="csv" {% if data_call and data_call.data_type == 'csv' %}selected{% endif %}>CSV</option></select></label>
+  <label><span data-i18n="data_type">Data type</span><select name="data_type" data-call-type-select>
+    <option value="image_text" {% if not data_call or data_call.data_type == 'image_text' %}selected{% endif %} data-i18n="image_text">Image-Text pairs</option>
+    <option value="csv" {% if data_call and data_call.data_type == 'csv' %}selected{% endif %}>CSV</option>
+    <option value="image_segmentation_text" {% if data_call and data_call.data_type == 'image_segmentation_text' %}selected{% endif %} data-i18n="image_segmentation_text">Image-Segmentation-Text</option>
+  </select></label>
   <label class="full"><span data-i18n="description">Description</span><textarea name="description" required placeholder="What the data will be used for">{{ data_call.description if data_call else '' }}</textarea></label>
   <label class="full"><span data-i18n="criteria">Acceptance criteria</span><textarea name="acceptance_criteria" required placeholder="One clear subject, daylight, no visible faces, location in metadata">{{ data_call.acceptance_criteria if data_call else '' }}</textarea></label>
-  <label><span data-i18n="review_mode">Review mode</span><select name="review_mode"><option value="ai_assisted" {% if not data_call or data_call.review_mode == 'ai_assisted' %}selected{% endif %} data-i18n="ai_assisted">AI-assisted</option><option value="manual" {% if data_call and data_call.review_mode == 'manual' %}selected{% endif %} data-i18n="manual">Manual</option></select></label>
-  <label><span data-i18n="maximum_accepted">Maximum accepted</span><input type="number" name="max_acceptances" min="1" max="100" value="{{ data_call.max_acceptances if data_call else 5 }}" required></label>
+  <label class="full"><span data-i18n="ai_evaluation_prompt">Detailed AI evaluation prompt</span><textarea name="ai_evaluation_prompt" maxlength="3000" placeholder="Explain exactly what the AI should assess and report.">{{ data_call.ai_evaluation_prompt or '' if data_call else '' }}</textarea></label>
+  <fieldset class="full type-options" data-call-type-fields="csv" {% if not data_call or data_call.data_type != 'csv' %}hidden{% endif %}>
+    <legend data-i18n="csv_requirements">CSV requirements</legend>
+    <label><span data-i18n="csv_fields">Required fields and types</span><textarea name="csv_columns" placeholder="id:integer&#10;label:string&#10;score:number">{{ data_call.csv_columns or '' if data_call else '' }}</textarea><small class="muted">One field per line. Types: string, integer, number, boolean, date.</small></label>
+    <div class="form-grid compact-grid">
+      <label><span data-i18n="csv_delimiter">Delimiter</span><select name="csv_delimiter"><option value="comma" {% if not data_call or data_call.csv_delimiter in [None, 'comma'] %}selected{% endif %}>Comma</option><option value="semicolon" {% if data_call and data_call.csv_delimiter == 'semicolon' %}selected{% endif %}>Semicolon</option><option value="tab" {% if data_call and data_call.csv_delimiter == 'tab' %}selected{% endif %}>Tab</option></select></label>
+      <label><span data-i18n="unique_field">Unique field (optional)</span><input name="csv_unique_column" value="{{ data_call.csv_unique_column or '' if data_call else '' }}"></label>
+      <label><span data-i18n="minimum_records">Minimum records</span><input type="number" name="csv_min_records" min="1" max="100000" value="{{ data_call.csv_min_records or 1 if data_call else 1 }}"></label>
+      <label><span data-i18n="maximum_records">Maximum records</span><input type="number" name="csv_max_records" min="1" max="100000" value="{{ data_call.csv_max_records if data_call and data_call.csv_max_records is not none else '' }}" placeholder="No limit"><small class="muted" data-i18n="maximum_records_help">Leave blank for no maximum.</small></label>
+    </div>
+    <label class="checkbox-label"><input type="checkbox" name="csv_allow_extra_columns" {% if data_call and data_call.csv_allow_extra_columns %}checked{% endif %}> <span data-i18n="allow_extra_fields">Allow extra fields</span></label>
+    <label class="checkbox-label"><input type="checkbox" name="csv_allow_missing_values" {% if data_call and data_call.csv_allow_missing_values %}checked{% endif %}> <span data-i18n="allow_missing_values">Allow missing values</span></label>
+  </fieldset>
+  <fieldset class="full type-options" data-call-type-fields="image_segmentation_text" {% if not data_call or data_call.data_type != 'image_segmentation_text' %}hidden{% endif %}>
+    <legend data-i18n="segmentation_package">Segmentation package</legend>
+    <label><span data-i18n="required_components">Required components</span><select name="segmentation_mode">
+      <option value="image_seg" {% if data_call and data_call.segmentation_mode == 'image_seg' %}selected{% endif %}>Image + Segmentation</option>
+      <option value="seg_text" {% if data_call and data_call.segmentation_mode == 'seg_text' %}selected{% endif %}>Segmentation + Text</option>
+      <option value="image_seg_text" {% if not data_call or data_call.segmentation_mode == 'image_seg_text' %}selected{% endif %}>Image + Segmentation + Text</option>
+    </select></label>
+  </fieldset>
+  <label><span data-i18n="review_mode">Review mode</span><select name="review_mode" data-review-mode><option value="ai_assisted" {% if not data_call or data_call.review_mode == 'ai_assisted' %}selected{% endif %} data-i18n="ai_assisted">AI-assisted</option><option value="manual" {% if data_call and data_call.review_mode == 'manual' %}selected{% endif %} data-i18n="manual">Manual</option></select></label>
+  <label><span data-i18n="maximum_accepted">Maximum accepted</span><input type="number" name="max_acceptances" min="1" max="100000" value="{{ data_call.max_acceptances if data_call else 5 }}" required></label>
   <label><span data-i18n="standard_reward">Standard reward</span> ({{ token_symbol }})<input type="number" name="standard_reward" min="0.000001" step="0.000001" value="{{ format_token(data_call.standard_reward, token_decimals) if data_call else 1 }}" required></label>
   <label><span data-i18n="high_reward">High reward (optional)</span><input type="number" name="high_reward" min="0.000001" step="0.000001" value="{{ format_token(data_call.high_reward, token_decimals) if data_call and data_call.high_reward else '' }}" placeholder="2"></label>
   <label><span data-i18n="deadline">Deadline (UTC)</span><input type="datetime-local" name="deadline" value="{{ data_call.deadline.strftime('%Y-%m-%dT%H:%M') if data_call else '' }}" required></label>

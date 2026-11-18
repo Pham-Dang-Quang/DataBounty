@@ -1,0 +1,7 @@
+{% macro account_identity(account, bold=false, extra_class='') -%}
+  {% set account_label = account.display_name or account.email or ((account.wallet_address[:6] ~ '…' ~ account.wallet_address[-4:]) if account.wallet_address else 'Account') %}
+  <span class="account-identity {{ extra_class }}">
+    <img class="avatar" src="{% if account.profile_image %}/profiles/{{ account.id }}/picture{% else %}/static/images/default-avatar.svg{% endif %}" alt="" loading="lazy">
+    {% if bold %}<strong>{{ account_label }}</strong>{% else %}<span>{{ account_label }}</span>{% endif %}
+  </span>
+{%- endmacro %}

@@ -38,7 +38,9 @@ Use English for code identifiers, API fields, logs, and documentation. Keep visi
 
 ## MVP boundaries
 
-- Support one file per contribution: an image with required companion text, or a UTF-8 CSV file.
+- Support image-text pairs, typed UTF-8 CSV, and image-segmentation-text packages. Segmentation calls
+  choose image+segmentation, segmentation+text, or all three; keep uploads to at most two image files
+  plus companion text.
 - A data call contains a title, description, data type, acceptance criteria, deadline, reward amount, and review mode.
 - Support manual review and AI-assisted review. Fully automatic AI payment is a later feature.
 - AI returns a recommendation, quality tier, and short explanation. The caller makes the final payout decision.
@@ -48,8 +50,19 @@ Use English for code identifiers, API fields, logs, and documentation. Keep visi
   Never request or store a seed phrase or private key.
 - Keep profiles, one-level call discussions, up to five author links, light/dark themes, and
   English/Vietnamese UI switching minimal.
-- Keep caller review to three states: undecided, accepted, and rejected. Exact repeats of rejected
-  file content are rejected before AI evaluation.
+- Keep caller review to exactly three user-facing states: undecided, accepted, and rejected.
+  Approval remains undecided until payout is confirmed; accepted means confirmed paid. Exact
+  repeats of rejected file content are rejected before AI evaluation.
+- A caller may assign multiple account-email moderators. Moderators may inspect and decide
+  contributions only; call management, bulk AI approval, accepted-data export, and payouts remain
+  caller-only. Record the deciding account on every manual or bulk decision.
+- The caller may apply all decisive AI recommendations and download confirmed-paid data as one ZIP.
+  Never include rejected or undecided data in that export.
+- Never send original undecided or rejected image or CSV bytes to a caller or moderator. Persist and serve
+  a versioned, reduced, recompressed, heavily watermarked image derivative; switch to the original
+  only after payout confirmation. Hide CSV contents until confirmed payment and show reviewers only
+  deterministic validation plus the AI assessment. Keep companion text readable. Treat browser copy
+  controls as deterrence, not screenshot prevention.
 
 ## Core invariants
 

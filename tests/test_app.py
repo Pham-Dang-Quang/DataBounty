@@ -52,8 +52,8 @@ def create_call(client: ASGITestClient, title: str = "Useful city trees") -> int
         data={
             "title": title,
             "description": "Collect short descriptions of healthy street trees.",
-            "data_type": "csv",
-            "acceptance_criteria": "CSV rows describing healthy street trees",
+            "data_type": "image_text",
+            "acceptance_criteria": "Clear images of healthy street trees with accurate text",
             "review_mode": "ai_assisted",
             "standard_reward": "1",
             "high_reward": "2",
@@ -82,6 +82,32 @@ def test_health_and_home_render(client: ASGITestClient) -> None:
     assert "AI-assisted data bounties" in response.text
 
 
+def test_new_call_form_offers_extended_data_types(client: ASGITestClient) -> None:
+    account = Account.create()
+    sign_in(client, account.key.hex())
+    form = client.get("/calls/new")
+    assert 'value="image_text"' in form.text
+    assert '<option value="csv"' in form.text
+    assert '<option value="image_segmentation_text"' in form.text
+
+    rejected = client.post(
+        "/calls",
+        data={
+            "title": "Unsupported CSV call",
+            "description": "This datatype is intentionally omitted.",
+            "data_type": "csv",
+            "acceptance_criteria": "Valid CSV rows",
+            "review_mode": "manual",
+            "standard_reward": "1",
+            "high_reward": "",
+            "max_acceptances": "2",
+            "deadline": (datetime.now(UTC) + timedelta(days=2)).strftime("%Y-%m-%dT%H:%M"),
+        },
+    )
+    assert rejected.status_code == 422
+    assert "require AI-assisted review" in rejected.text
+
+
 def test_other_account_sees_open_call_caller(client: ASGITestClient) -> None:
     caller = Account.create()
     visitor = Account.create()
@@ -102,8 +128,28 @@ def test_other_account_sees_open_call_caller(client: ASGITestClient) -> None:
     assert home.status_code == 200
     assert "Visible public call" in home.text
     assert "Visible caller" in home.text
+    assert "/static/images/default-avatar.svg" in home.text
     detail = client.get(f"/calls/{call_id}")
     assert "Collects careful public datasets." in detail.text
+    assert "/static/images/default-avatar.svg" in detail.text
+
+
+def test_account_without_uploaded_picture_receives_default_avatar(
+    client: ASGITestClient,
+) -> None:
+    account = Account.create()
+    sign_in(client, account.key.hex())
+    with client.app.state.database.session_factory() as db:
+        user = db.scalar(select(User).where(User.wallet_address == account.address))
+        assert user is not None
+        user_id = user.id
+        assert user.profile_image is None
+
+    response = client.get(f"/profiles/{user_id}/picture")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/svg+xml")
+    home = client.get("/")
+    assert "/static/images/default-avatar.svg" in home.text
 
 
 def test_owner_open_call_is_not_listed_twice(client: ASGITestClient) -> None:
@@ -117,7 +163,41 @@ def test_owner_open_call_is_not_listed_twice(client: ASGITestClient) -> None:
     assert home.text.count("One visible card only") == 1
 
 
-def test_review_counter_and_three_tabs(client: ASGITestClient) -> None:
+def test_browser_http_error_returns_to_page_and_opens_popup(
+    client: ASGITestClient,
+) -> None:
+    response = client.get(
+        "/calls/999999",
+        headers={"accept": "text/html", "referer": "http://testserver/"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == "/"
+
+    home = client.get("/", headers={"accept": "text/html"})
+    assert "Call not found" in home.text
+    popup = home.text.split('id="error-popup"', 1)[1].split(">", 1)[0]
+    assert "hidden" not in popup
+    assert "error-page" not in home.text
+
+
+def test_browser_request_validation_error_uses_popup(client: ASGITestClient) -> None:
+    response = client.post(
+        "/signup",
+        data={},
+        headers={"accept": "text/html", "referer": "http://testserver/signup"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == "/signup"
+
+    signup = client.get("/signup", headers={"accept": "text/html"})
+    assert "Invalid request" in signup.text
+    popup = signup.text.split('id="error-popup"', 1)[1].split(">", 1)[0]
+    assert "hidden" not in popup
+
+
+def test_review_counter_and_three_state_tabs(client: ASGITestClient) -> None:
     caller = Account.create()
     sign_in(client, caller.key.hex())
     call_id = create_call(client, "Tabbed review")
@@ -128,6 +208,7 @@ def test_review_counter_and_three_tabs(client: ASGITestClient) -> None:
         assert data_call is not None
         for filename, status, decision in (
             ("undecided.csv", ContributionStatus.READY, None),
+            ("awaiting.csv", ContributionStatus.AWAITING_PAYOUT, "accept"),
             ("accepted.csv", ContributionStatus.PAID, "accept"),
             ("rejected.csv", ContributionStatus.REJECTED, "reject"),
         ):
@@ -147,18 +228,25 @@ def test_review_counter_and_three_tabs(client: ASGITestClient) -> None:
         db.commit()
 
     detail = client.get(f"/calls/{call_id}")
-    assert "Review contributions (1)" in detail.text
+    assert "Review contributions (2)" in detail.text
+    assert '<details class="activity-dropdown">' in detail.text
+    assert 'class="activity-count"' in detail.text
 
     undecided = client.get(f"/calls/{call_id}/review?tab=undecided")
-    assert ">Undecided</span> (1)" in undecided.text
+    assert ">Undecided</span> (2)" in undecided.text
     assert ">Accepted</span> (1)" in undecided.text
     assert ">Rejected</span> (1)" in undecided.text
     assert "undecided.csv" in undecided.text
+    assert "awaiting.csv" in undecided.text
     assert "accepted.csv" not in undecided.text
+    assert 'class="badge undecided"' in undecided.text
+    assert client.get(f"/calls/{call_id}/review?tab=awaiting_payout").status_code == 422
 
     accepted = client.get(f"/calls/{call_id}/review?tab=accepted")
     assert "accepted.csv" in accepted.text
+    assert 'class="badge accepted"' in accepted.text
     assert "undecided.csv" not in accepted.text
+    assert "awaiting.csv" not in accepted.text
     rejected = client.get(f"/calls/{call_id}/review?tab=rejected")
     assert "rejected.csv" in rejected.text
     assert "accepted.csv" not in rejected.text
@@ -169,7 +257,7 @@ def test_repeat_of_rejected_data_skips_evaluation(client: ASGITestClient) -> Non
     sign_in(client, caller.key.hex())
     call_id = create_call(client, "Rejected duplicate")
     open_call(client, call_id)
-    content = b"label,value\nsign,unusable\n"
+    content = _png_bytes()
     database = client.app.state.database
     with database.session_factory() as db:
         data_call = db.get(DataCall, call_id)
@@ -178,10 +266,10 @@ def test_repeat_of_rejected_data_skips_evaluation(client: ASGITestClient) -> Non
             Contribution(
                 call_id=call_id,
                 contributor_id=data_call.caller_id,
-                stored_filename="rejected-original.csv",
-                original_filename="rejected-original.csv",
+                stored_filename="rejected-original.png",
+                original_filename="rejected-original.png",
                 sha256=hashlib.sha256(content).hexdigest(),
-                media_type="text/csv",
+                media_type="image/png",
                 size_bytes=len(content),
                 status=ContributionStatus.REJECTED,
                 final_decision="reject",
@@ -191,7 +279,8 @@ def test_repeat_of_rejected_data_skips_evaluation(client: ASGITestClient) -> Non
 
     repeated = client.post(
         f"/calls/{call_id}/contributions",
-        files={"contribution_file": ("repeat.csv", content, "text/csv")},
+        data={"companion_text": "Repeated rejected street sign"},
+        files={"contribution_file": ("repeat.png", content, "image/png")},
     )
     assert repeated.status_code == 409
     assert "rejected without AI reevaluation" in repeated.text
@@ -327,11 +416,12 @@ def test_create_contribute_review_flow(client: ASGITestClient) -> None:
     sign_in(client, contributor.key.hex())
     response = client.post(
         f"/calls/{call_id}/contributions",
+        data={"companion_text": "A healthy maple street tree with green leaves"},
         files={
             "contribution_file": (
-                "tree.csv",
-                b"tree,description\nmaple,A healthy street tree with green leaves.\n",
-                "text/csv",
+                "tree.png",
+                _png_bytes(),
+                "image/png",
             )
         },
         follow_redirects=False,
@@ -350,11 +440,12 @@ def test_create_contribute_review_flow(client: ASGITestClient) -> None:
 
     duplicate = client.post(
         f"/calls/{call_id}/contributions",
+        data={"companion_text": "Duplicate tree image"},
         files={
             "contribution_file": (
-                "again.csv",
-                b"tree,description\nmaple,A healthy street tree with green leaves.\n",
-                "text/csv",
+                "again.png",
+                _png_bytes(),
+                "image/png",
             )
         },
     )
@@ -364,7 +455,7 @@ def test_create_contribute_review_flow(client: ASGITestClient) -> None:
     sign_in(client, caller.key.hex())
     queue = client.get(f"/calls/{call_id}/review")
     assert queue.status_code == 200
-    assert "tree.csv" in queue.text
+    assert "tree.png" in queue.text
     accepted = client.post(
         f"/contributions/{contribution_id}/decision",
         data={"decision": "accept", "tier": "high"},
@@ -384,12 +475,13 @@ def test_create_contribute_review_flow(client: ASGITestClient) -> None:
 def test_upload_validation_and_transaction_hash(client: ASGITestClient) -> None:
     account = Account.create()
     sign_in(client, account.key.hex())
-    call_id = create_call(client, "CSV samples")
+    call_id = create_call(client, "Image samples")
     open_call(client, call_id)
 
     invalid = client.post(
         f"/calls/{call_id}/contributions",
-        files={"contribution_file": ("bad.csv", b"\xff\xfe", "text/csv")},
+        data={"companion_text": "Invalid image bytes"},
+        files={"contribution_file": ("bad.png", b"\xff\xfe", "image/png")},
     )
     assert invalid.status_code == 422
 

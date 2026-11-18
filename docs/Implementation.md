@@ -29,8 +29,13 @@ Create more modules only when a file becomes difficult to understand.
 - Set up FastAPI, Jinja2, SQLite, SQLAlchemy, and tests.
 - Implement email/password accounts, profiles, and one signature-linked transaction wallet.
 - Implement call creation and listing.
-- Implement one-file contribution upload and validation.
+- Implement image-text, typed CSV, and minimal image-segmentation-text upload validation. Gate CSV
+  AI evaluation behind schema/type/row validation. Gate segmentation AI evaluation behind adaptive
+  palette grouping, bounded reconstruction error and boundary complexity, distinct region edges,
+  and source/mask aspect ratios within 0.5%; do not require matching pixel dimensions.
 - Implement manual accept/reject without blockchain.
+- Implement per-call moderators, reviewer attribution, rejected-data reconsideration, bulk AI
+  decisions, and accepted-only ZIP export.
 
 Exit: two wallets can complete the off-chain flow locally.
 
@@ -42,7 +47,7 @@ Exit: two wallets can complete the off-chain flow locally.
 - Show the recommendation beside manual review controls.
 - Record model name and result.
 
-Exit: example image-text/CSV contributions produce understandable recommendations, and failures fall
+Exit: example image-text, CSV, and segmentation contributions produce understandable recommendations, and failures fall
 back to manual review.
 
 ## Phase 3: Avalanche Fuji
@@ -56,7 +61,9 @@ Exit: the complete demo flow transfers a test reward exactly once.
 
 ## Phase 4: demo polish
 
-- Add responsive styling and clear error/loading/empty states.
+- Add responsive styling and clear error/loading/empty states. Route browser errors back to the
+  originating local page through a one-use session message and show them in the shared dismissible
+  popup; never render a standalone error page.
 - Add sample calls and a short demo script.
 - Run focused backend, contract, and end-to-end tests.
 - Remove unused dependencies and incomplete features.

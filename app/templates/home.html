@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros.html" import account_identity %}
 {% block content %}
 <section class="hero">
   <p class="eyebrow" data-i18n="hero_eyebrow">AI-assisted data bounties</p>
@@ -16,8 +17,7 @@
         <span class="badge {{ call.status }}">{{ call.status }}</span>
         <h3>{{ call.title }}</h3>
         <div class="card-author">
-          {% if call.caller.profile_image %}<img class="avatar" src="/profiles/{{ call.caller.id }}/picture" alt="">{% endif %}
-          <span><span data-i18n="by">By</span> {{ call.caller.display_name or 'Account' }}</span>
+          <span data-i18n="by">By</span> {{ account_identity(call.caller) }}
         </div>
         <p>{{ call.description }}</p>
       </a>
@@ -32,11 +32,10 @@
   <div class="card-grid">
     {% for call in calls %}
       <a class="card" href="/calls/{{ call.id }}">
-        <span class="badge">{{ 'image-text' if call.data_type in ['image', 'image_text'] else 'CSV' }}</span>
+        <span class="badge">{% if call.data_type in ['image', 'image_text'] %}image-text{% elif call.data_type == 'csv' %}CSV{% else %}segmentation{% endif %}</span>
         <h3>{{ call.title }}</h3>
         <div class="card-author">
-          {% if call.caller.profile_image %}<img class="avatar" src="/profiles/{{ call.caller.id }}/picture" alt="">{% endif %}
-          <span><span data-i18n="by">By</span> {{ call.caller.display_name or 'Account' }}</span>
+          <span data-i18n="by">By</span> {{ account_identity(call.caller) }}
         </div>
         <p>{{ call.description }}</p>
         <strong>{{ format_token(call.standard_reward, token_decimals) }} {{ token_symbol }} reward</strong>

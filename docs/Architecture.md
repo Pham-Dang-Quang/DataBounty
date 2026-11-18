@@ -24,13 +24,20 @@ Use HTML, CSS, and vanilla JavaScript. `viem` handles wallet connection, signatu
 
 ### SQLite and local files
 
-SQLite stores users, calls, contributions, AI results, and transaction references. Uploaded files live outside the public static directory under opaque generated names.
+SQLite stores users, calls, per-call moderator assignments, contributions, reviewer attribution,
+AI results, and transaction references. Uploaded files live outside the public static directory
+under opaque generated names.
 
 ### AI evaluator
 
-A Python adapter sends the contribution, image companion text when present, caller criteria, and data type to the configured
+A Python adapter sends the applicable image/mask/CSV, companion text, caller criteria, deterministic
+validation summary, and detailed assessment prompt to the configured
 OpenAI-compatible API using `Qwen/Qwen3-VL-8B-Instruct`. It validates the returned recommendation,
 tier, and explanation. Run it outside the request path with a simple background task.
+
+For two-image segmentation packages, the mask is sent first as the primary artifact and the source
+image second as context only. The prompt states that they are separate files and that overlay status
+must be judged only from pixels inside the mask, preventing the model from mentally compositing them.
 
 Evaluation progress and its current stage are stored on the contribution. The contribution page
 polls one authenticated JSON endpoint while evaluation runs; no WebSocket or job-queue service is
@@ -56,7 +63,15 @@ Browser -> FastAPI -> SQLite/local uploads -> hosted AI API
 - Files and AI results are off-chain and controlled by the application.
 - When AI review is enabled, contribution content is disclosed to the configured API provider.
 - Funds are held and transferred by the escrow contract.
-- The caller remains responsible for the final acceptance decision.
+- The caller controls reviewer membership, bulk AI approval, export, and payouts. Assigned
+  moderators may make individual review decisions.
+- The accepted ZIP is caller-only, contains confirmed-paid data, and excludes rejected and
+  undecided data, including approved data whose payment is not confirmed. Authorized review display
+  cannot prevent a reviewer from saving browser-visible content.
+- Undecided/rejected images use a versioned derivative stored privately after server-side
+  downscaling, recompression, and repeated watermarking. Confirmed-paid pages switch to the original.
+  Companion text stays readable. CSV bytes remain hidden from reviewers until confirmed payment;
+  responses use `no-store` headers.
 - The hackathon app is a demonstration, not a production custody or compliance system.
 
 ## Contract responsibilities
@@ -65,7 +80,7 @@ The contract should only:
 
 - create/register a funded call;
 - track remaining reward balance;
-- pay a contribution ID once to a recipient;
+- pay a persistent random contribution key once to a recipient;
 - reject unauthorized, duplicate, or excessive payouts;
 - return unused funds after the deadline;
 - emit funding, payout, and refund events.
@@ -75,10 +90,11 @@ Do not put uploads, AI logic, criteria interpretation, user profiles, or general
 ## Minimal security
 
 - Validate upload extension, detected type, size, and UTF-8/image readability.
-- Validate required image companion text and CSV headers/row widths.
+- Validate image readability and required component combinations. Validate CSV encoding, delimiter,
+  headers, typed values, row limits, extra/missing rules, and optional uniqueness before AI.
 - Use generated storage names and never execute uploaded content.
 - Hash passwords with scrypt, use short sessions, and use one-time nonces for wallet linking.
-- Check ownership on every caller/contributor action.
+- Check caller, moderator, or contributor authorization on every private action.
 - Never store wallet private keys.
 - Test escrow balance conservation and duplicate payout rejection.
 

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import secrets
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -60,8 +61,21 @@ class DataCall(Base):
     caller_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     title: Mapped[str] = mapped_column(String(120))
     description: Mapped[str] = mapped_column(Text)
-    data_type: Mapped[str] = mapped_column(String(10))
+    data_type: Mapped[str] = mapped_column(String(30))
     acceptance_criteria: Mapped[str] = mapped_column(Text)
+    ai_evaluation_prompt: Mapped[str | None] = mapped_column(Text)
+    csv_columns: Mapped[str | None] = mapped_column(Text)
+    csv_delimiter: Mapped[str | None] = mapped_column(String(20))
+    csv_min_records: Mapped[int | None]
+    csv_max_records: Mapped[int | None]
+    csv_allow_extra_columns: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0"
+    )
+    csv_allow_missing_values: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0"
+    )
+    csv_unique_column: Mapped[str | None] = mapped_column(String(120))
+    segmentation_mode: Mapped[str | None] = mapped_column(String(30))
     review_mode: Mapped[str] = mapped_column(String(20))
     standard_reward: Mapped[int] = mapped_column(BigInteger)
     high_reward: Mapped[int | None] = mapped_column(BigInteger)
@@ -78,6 +92,9 @@ class DataCall(Base):
         back_populates="data_call", cascade="all, delete-orphan"
     )
     comments: Mapped[list[Comment]] = relationship(
+        back_populates="data_call", cascade="all, delete-orphan"
+    )
+    moderator_links: Mapped[list[CallModerator]] = relationship(
         back_populates="data_call", cascade="all, delete-orphan"
     )
 
@@ -97,12 +114,19 @@ class Contribution(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     call_id: Mapped[int] = mapped_column(ForeignKey("data_calls.id"), index=True)
     contributor_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    reviewer_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True)
     stored_filename: Mapped[str] = mapped_column(String(80), unique=True)
     original_filename: Mapped[str] = mapped_column(String(255))
     sha256: Mapped[str] = mapped_column(String(64))
     media_type: Mapped[str] = mapped_column(String(100))
     size_bytes: Mapped[int]
     companion_text: Mapped[str | None] = mapped_column(Text)
+    source_stored_filename: Mapped[str | None] = mapped_column(String(80), unique=True)
+    source_original_filename: Mapped[str | None] = mapped_column(String(255))
+    source_sha256: Mapped[str | None] = mapped_column(String(64))
+    source_media_type: Mapped[str | None] = mapped_column(String(100))
+    source_size_bytes: Mapped[int | None]
+    validation_summary: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(30), default=ContributionStatus.EVALUATING)
     evaluation_progress: Mapped[int] = mapped_column(default=0, server_default="0")
     evaluation_stage: Mapped[str] = mapped_column(
@@ -115,12 +139,16 @@ class Contribution(Base):
     final_decision: Mapped[str | None] = mapped_column(String(20))
     final_tier: Mapped[str | None] = mapped_column(String(20))
     reward_amount: Mapped[int | None] = mapped_column(BigInteger)
+    payout_key: Mapped[str] = mapped_column(
+        String(66), unique=True, default=lambda: f"0x{secrets.token_hex(32)}"
+    )
     payout_tx_hash: Mapped[str | None] = mapped_column(String(66), unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     data_call: Mapped[DataCall] = relationship(back_populates="contributions")
-    contributor: Mapped[User] = relationship()
+    contributor: Mapped[User] = relationship(foreign_keys=[contributor_id])
+    reviewer: Mapped[User | None] = relationship(foreign_keys=[reviewer_id])
 
 
 class Event(Base):
@@ -144,6 +172,18 @@ class CallLink(Base):
     url: Mapped[str] = mapped_column(String(500))
 
     data_call: Mapped[DataCall] = relationship(back_populates="links")
+
+
+class CallModerator(Base):
+    __tablename__ = "call_moderators"
+    __table_args__ = (UniqueConstraint("call_id", "user_id", name="uq_call_moderator"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    call_id: Mapped[int] = mapped_column(ForeignKey("data_calls.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+
+    data_call: Mapped[DataCall] = relationship(back_populates="moderator_links")
+    user: Mapped[User] = relationship()
 
 
 class Comment(Base):
