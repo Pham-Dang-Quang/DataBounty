@@ -141,6 +141,15 @@ IDs during the additive migration so already-submitted Fuji payouts still reconc
 Once a payout transaction hash is recorded, hide the Pay action and poll for confirmation rather
 than allowing a duplicate transaction.
 
+### Funded acceptance expansion
+
+Keep the existing `max_acceptances` database field and avoid a new funding table for the hackathon.
+Each added slot costs the call's maximum reward tier. The owner calls the escrow's `addFunds`, then
+the backend verifies the confirmed sender and remaining on-chain liability before increasing the
+limit. Submissions never stop merely because the current acceptance limit is full; only acceptance
+is blocked. This contract change requires a new deployment because the current Fuji escrow is not
+upgradeable.
+
 ## Still to choose
 
 - Nothing required for the hackathon MVP.

@@ -179,3 +179,8 @@ again in `contracts/README.md`.
 7. Submit the payout and refresh after confirmation.
 8. Show the confirmed transaction and contributor token balance in the wallet/explorer.
 
+To expand a funded call, deploy the current escrow source (older deployments do not contain
+`addFunds`), update `ESCROW_CONTRACT_ADDRESS`, and restart the app. The caller can then select a
+number of additional acceptance slots, approve the calculated DBT amount, and add it to escrow.
+Existing calls tied to an older immutable escrow cannot be topped up in place.
+

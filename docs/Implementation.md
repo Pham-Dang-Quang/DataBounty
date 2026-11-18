@@ -55,6 +55,12 @@ back to manual review.
 - Implement and test the minimal escrow contract and mock ERC-20.
 - Deploy to Fuji and record addresses in configuration.
 - Let callers fund calls and approve payouts through their wallet.
+- Let callers approve ERC-20 allowance and call `addFunds` to buy additional acceptance slots. The
+  backend changes the existing `max_acceptances` field only after Fuji confirms enough remaining
+  escrow for every unpaid slot at the maximum reward tier.
+- Keep submissions open until the deadline regardless of whether all currently funded slots are
+  committed; block only further acceptance until the limit is expanded.
+- Preserve all three hosted-model outcomes and allow combined AI recommendation filters in review.
 - Read confirmed contract events and show transaction links/status.
 
 Exit: the complete demo flow transfers a test reward exactly once.

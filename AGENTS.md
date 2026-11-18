@@ -58,6 +58,11 @@ Use English for code identifiers, API fields, logs, and documentation. Keep visi
   caller-only. Record the deciding account on every manual or bulk decision.
 - The caller may apply all decisive AI recommendations and download confirmed-paid data as one ZIP.
   Never include rejected or undecided data in that export.
+- Contributors may keep submitting until the deadline even when the funded acceptance limit is
+  full. The caller cannot approve more contributions until an owner-only Fuji top-up funds and
+  confirms additional acceptance slots.
+- AI recommendations are exactly `accept`, `reject`, or `unsure`; review filters may combine any of
+  those values. `unsure` always remains for human review.
 - Never send original undecided or rejected image or CSV bytes to a caller or moderator. Persist and serve
   a versioned, reduced, recompressed, heavily watermarked image derivative; switch to the original
   only after payout confirmation. Hide CSV contents until confirmed payment and show reviewers only

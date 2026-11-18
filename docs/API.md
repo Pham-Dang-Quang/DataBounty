@@ -24,7 +24,10 @@ Most pages are server-rendered. JSON endpoints exist only where JavaScript needs
 - `POST /calls/{id}/edit` — update an unfunded draft.
 - `POST /calls/{id}/delete` — remove an unfunded draft.
 - `POST /calls/{id}/funding-tx` — record a submitted funding transaction hash; its sender must match the signed-in caller.
-- `GET /calls/{id}/review?tab=undecided|accepted|rejected` — caller/moderator review queue. An
+- `POST /calls/{id}/top-up-tx` — after a successful `addFunds` transaction, verify its sender,
+  confirmation, and remaining escrow liability before expanding `max_acceptances`.
+- `GET /calls/{id}/review?tab=undecided|accepted|rejected&ai=accept&ai=unsure` — caller/moderator
+  review queue. Repeated `ai` parameters combine accept, reject, and unsure filters. An
   approved contribution stays undecided until payout confirmation; accepted means confirmed paid.
 - `POST /calls/{id}/moderators` — caller adds an existing account by email.
 - `POST /calls/{id}/moderators/{user_id}/delete` — caller removes a moderator.

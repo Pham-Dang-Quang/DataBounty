@@ -5,10 +5,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{{ app_name }}{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', path='/css/app.css') }}?v=12">
+  <link rel="stylesheet" href="{{ url_for('static', path='/css/app.css') }}?v=13">
   <script>document.documentElement.dataset.theme = localStorage.getItem('theme') || 'light';</script>
-  <script type="module" src="{{ url_for('static', path='/js/ui.js') }}?v=18"></script>
-  <script type="module" src="{{ url_for('static', path='/js/wallet.js') }}?v=8"></script>
+  <script type="module" src="{{ url_for('static', path='/js/ui.js') }}?v=19"></script>
+  <script type="module" src="{{ url_for('static', path='/js/wallet.js') }}?v=9"></script>
   <script type="module" src="{{ url_for('static', path='/js/evaluation.js') }}?v=1"></script>
 </head>
 <body data-chain-id="{{ chain_id }}" data-escrow="{{ escrow_address }}" data-token="{{ token_address }}"

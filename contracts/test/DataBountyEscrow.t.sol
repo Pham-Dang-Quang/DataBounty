@@ -52,6 +52,29 @@ contract DataBountyEscrowTest is Test {
         escrow.pay(CALL_ID, keccak256("2"), contributor, 1);
     }
 
+    function testOwnerCanAddFunding() public {
+        _fund();
+        uint256 added = 2_000_000;
+        vm.prank(caller);
+        token.faucet(added);
+        vm.prank(caller);
+        token.approve(address(escrow), added);
+
+        vm.prank(caller);
+        escrow.addFunds(CALL_ID, added);
+
+        (, uint256 remaining,,) = escrow.calls(CALL_ID);
+        assertEq(remaining, BUDGET + added);
+        assertEq(token.balanceOf(address(escrow)), BUDGET + added);
+    }
+
+    function testOnlyOwnerCanAddFunding() public {
+        _fund();
+        vm.expectRevert(DataBountyEscrow.NotCallOwner.selector);
+        vm.prank(contributor);
+        escrow.addFunds(CALL_ID, 1);
+    }
+
     function testRefundAfterDeadline() public {
         _fund();
         vm.expectRevert(DataBountyEscrow.RefundTooEarly.selector);

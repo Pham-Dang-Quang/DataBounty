@@ -72,6 +72,23 @@
         <p>Funding was submitted. The call terms are now frozen while Fuji confirmation is pending.</p>
       {% else %}
         <a class="button" href="/calls/{{ data_call.id }}/review">Review contributions ({{ undecided_count }})</a>
+        <p class="muted">Accepted or awaiting payout: {{ accepted_count }} / {{ data_call.max_acceptances }}. Contributions remain open when this limit is reached.</p>
+        {% if data_call.status == 'open' and escrow_address and token_address and data_call.max_acceptances < 100000 %}
+        <form class="stack-form top-up-form" data-top-up-call
+          data-call-id="{{ data_call.escrow_call_id }}"
+          data-reward="{{ data_call.maximum_reward }}"
+          data-endpoint="/calls/{{ data_call.id }}/top-up-tx">
+          <label><span data-i18n="additional_contributions">Additional contribution acceptances</span>
+            <input id="additional-slots" type="number" name="additional_slots" min="1" max="{{ 100000 - data_call.max_acceptances }}" value="1" required>
+          </label>
+          <p class="muted"><span data-i18n="top_up_help">Each added slot funds the call's maximum reward tier.</span></p>
+          <div class="actions">
+            <button class="button secondary" type="button" data-mint-demo-token
+              data-slot-input="additional-slots" data-reward="{{ data_call.maximum_reward }}">Get demo {{ token_symbol }}</button>
+            <button class="button" type="submit" data-i18n="fund_more">Fund more DBT</button>
+          </div>
+        </form>
+        {% endif %}
       {% endif %}
       <div id="moderators" class="moderator-controls">
         <h3 data-i18n="moderators">Moderators</h3>

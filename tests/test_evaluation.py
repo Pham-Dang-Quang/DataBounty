@@ -312,6 +312,18 @@ def test_hosted_model_failure_is_unsure(monkeypatch: pytest.MonkeyPatch, tmp_pat
     assert updates[-1] == (90, "AI API unavailable; using safe fallback")
 
 
+def test_hosted_model_can_explicitly_recommend_unsure() -> None:
+    result = _parse_model_result(
+        '{"recommendation":"unsure","quality_tier":"high",'
+        '"explanation":"The submission does not provide enough evidence."}',
+        "test/model",
+    )
+
+    assert result.recommendation == "unsure"
+    assert result.tier == "standard"
+    assert "not provide enough evidence" in result.explanation
+
+
 def test_csv_model_request_contains_private_data_and_detailed_prompt(tmp_path) -> None:
     contribution = tmp_path / "private.csv"
     contribution.write_text("id,label\n1,cat\n", encoding="utf-8")

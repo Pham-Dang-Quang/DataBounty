@@ -42,6 +42,9 @@ const escrowAbi = [
   {type: "function", name: "fundCall", stateMutability: "nonpayable", inputs: [
     {name: "callId", type: "uint256"}, {name: "budget", type: "uint256"}, {name: "deadline", type: "uint64"},
   ], outputs: []},
+  {type: "function", name: "addFunds", stateMutability: "nonpayable", inputs: [
+    {name: "callId", type: "uint256"}, {name: "amount", type: "uint256"},
+  ], outputs: []},
   {type: "function", name: "pay", stateMutability: "nonpayable", inputs: [
     {name: "callId", type: "uint256"}, {name: "contributionId", type: "bytes32"},
     {name: "recipient", type: "address"}, {name: "amount", type: "uint256"},
@@ -126,13 +129,20 @@ document.querySelector("[data-mint-demo-token]")?.addEventListener("click", asyn
     button.disabled = true;
     const {client, account} = await wallet();
     show("Requesting valueless demo DBT from the Fuji faucet…");
+    const slotInput = button.dataset.slotInput
+      ? document.getElementById(button.dataset.slotInput)
+      : null;
+    const amount = slotInput
+      ? BigInt(slotInput.value) * BigInt(button.dataset.reward)
+      : BigInt(button.dataset.amount);
+    if (amount <= 0n) throw new Error("Enter at least one additional contribution.");
     const hash = await client.writeContract({
       account,
       chain: avalancheFuji,
       address: getAddress(token),
       abi: erc20Abi,
       functionName: "faucet",
-      args: [BigInt(button.dataset.amount)],
+      args: [amount],
     });
     show("Waiting for the demo DBT transaction to confirm…");
     const receipt = await publicClient.waitForTransactionReceipt({hash});
@@ -180,6 +190,42 @@ document.querySelector("[data-fund-call]")?.addEventListener("click", async (eve
     await postJson(button.dataset.endpoint, {tx_hash: hash});
     window.location.reload();
   } catch (error) { button.disabled = false; show(error.message, true); }
+});
+
+document.querySelector("[data-top-up-call]")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const submit = form.querySelector('button[type="submit"]');
+  try {
+    if (!escrow || !token) throw new Error("Contract addresses are not configured.");
+    submit.disabled = true;
+    const slots = BigInt(new FormData(form).get("additional_slots"));
+    const amount = slots * BigInt(form.dataset.reward);
+    if (slots <= 0n) throw new Error("Enter at least one additional contribution.");
+    const {client, account} = await wallet();
+    show("Approving additional reward tokens…");
+    const approvalHash = await client.writeContract({
+      account, chain: avalancheFuji, address: getAddress(token), abi: erc20Abi,
+      functionName: "approve", args: [getAddress(escrow), amount],
+    });
+    const approvalReceipt = await publicClient.waitForTransactionReceipt({hash: approvalHash});
+    if (approvalReceipt.status !== "success") throw new Error("The token approval failed.");
+    show("Adding funds to the escrow…");
+    const hash = await client.writeContract({
+      account, chain: avalancheFuji, address: getAddress(escrow), abi: escrowAbi,
+      functionName: "addFunds", args: [BigInt(form.dataset.callId), amount],
+    });
+    const receipt = await publicClient.waitForTransactionReceipt({hash});
+    if (receipt.status !== "success") throw new Error("The additional funding transaction failed.");
+    await postJson(form.dataset.endpoint, {
+      tx_hash: hash,
+      additional_slots: Number(slots),
+    });
+    window.location.reload();
+  } catch (error) {
+    submit.disabled = false;
+    show(error.message, true);
+  }
 });
 
 document.querySelector("[data-pay-contribution]")?.addEventListener("click", async (event) => {

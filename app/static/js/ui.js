@@ -39,7 +39,10 @@ const translations = {
     apply_ai: "Apply AI recommendations", download_accepted: "Download accepted ZIP",
     decided_by: "Decided by", reaccept: "Re-accept", approve_for_payout: "Approve for payout",
     payout_confirmation_pending: "Payout submitted. Waiting for Fuji confirmation.",
-    protected_preview_notice: "Protected low-resolution image preview. Repeated watermarks are baked into the stored derivative."
+    protected_preview_notice: "Protected low-resolution image preview. Repeated watermarks are baked into the stored derivative.",
+    additional_contributions: "Additional contribution acceptances", top_up_help: "Each added slot funds the call's maximum reward tier.", fund_more: "Fund more DBT",
+    filter_ai: "Filter AI recommendations", ai_accept: "AI accept", ai_reject: "AI reject", ai_unsure: "AI unsure", apply_filter: "Apply filter", clear_filter: "Clear",
+    acceptance_funding_required: "The funded acceptance limit is full. New contributions remain reviewable, but the caller must fund more DBT before accepting another."
   },
   vi: {
     settings: "Cài đặt", create_call: "Tạo yêu cầu", sign_out: "Đăng xuất", sign_in: "Đăng nhập",
@@ -81,7 +84,10 @@ const translations = {
     apply_ai: "Áp dụng đề xuất AI", download_accepted: "Tải ZIP dữ liệu đã chấp nhận",
     decided_by: "Quyết định bởi", reaccept: "Chấp nhận lại", approve_for_payout: "Duyệt để thanh toán",
     payout_confirmation_pending: "Đã gửi thanh toán. Đang chờ Fuji xác nhận.",
-    protected_preview_notice: "Bản xem trước hình ảnh độ phân giải thấp. Hình mờ lặp lại đã được ghi vào bản sao được lưu trữ."
+    protected_preview_notice: "Bản xem trước hình ảnh độ phân giải thấp. Hình mờ lặp lại đã được ghi vào bản sao được lưu trữ.",
+    additional_contributions: "Số đóng góp có thể chấp nhận thêm", top_up_help: "Mỗi suất bổ sung cấp vốn theo mức thưởng tối đa của yêu cầu.", fund_more: "Cấp thêm DBT",
+    filter_ai: "Lọc đề xuất AI", ai_accept: "AI chấp nhận", ai_reject: "AI từ chối", ai_unsure: "AI chưa chắc chắn", apply_filter: "Áp dụng bộ lọc", clear_filter: "Xóa bộ lọc",
+    acceptance_funding_required: "Đã dùng hết giới hạn chấp nhận được cấp vốn. Vẫn có thể xem đóng góp mới, nhưng người tạo phải cấp thêm DBT trước khi chấp nhận."
   }
 };
 

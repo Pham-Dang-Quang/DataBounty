@@ -38,6 +38,8 @@ Status: Core MVP implemented; final two-wallet contribution and payout demo rema
 - [x] Test funding, payout, duplicate rejection, insufficient balance, and refund.
 - [x] Deploy contracts to Fuji and record addresses.
 - [x] Add browser funding and payout transactions with `viem`.
+- [x] Add owner-only escrow top-ups and acceptance-limit expansion after confirmed funding.
+- [x] Keep submissions open at the acceptance cap and add combined accept/reject/unsure AI filters.
 - [x] Confirm transactions with `web3.py` and update application status.
 
 ## 4. Demo readiness

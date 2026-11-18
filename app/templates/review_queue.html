@@ -3,11 +3,23 @@
 {% block title %}Review · {{ data_call.title }}{% endblock %}
 {% block content %}
 <div class="page-heading"><p class="eyebrow" data-i18n="caller_review">Caller review</p><h1>{{ data_call.title }}</h1></div>
+{% if acceptance_full %}
+<div class="notice warning"><span data-i18n="acceptance_funding_required">The funded acceptance limit is full. New contributions remain reviewable, but the caller must fund more DBT before accepting another.</span> <a href="/calls/{{ data_call.id }}" data-i18n="fund_more">Fund more DBT</a></div>
+{% endif %}
 <nav class="review-tabs" aria-label="Contribution review states">
-  <a class="review-tab {% if tab == 'undecided' %}active{% endif %}" href="/calls/{{ data_call.id }}/review?tab=undecided"><span data-i18n="undecided">Undecided</span> ({{ tab_counts.undecided }})</a>
-  <a class="review-tab {% if tab == 'accepted' %}active{% endif %}" href="/calls/{{ data_call.id }}/review?tab=accepted"><span data-i18n="accepted">Accepted</span> ({{ tab_counts.accepted }})</a>
-  <a class="review-tab {% if tab == 'rejected' %}active{% endif %}" href="/calls/{{ data_call.id }}/review?tab=rejected"><span data-i18n="rejected">Rejected</span> ({{ tab_counts.rejected }})</a>
+  <a class="review-tab {% if tab == 'undecided' %}active{% endif %}" href="/calls/{{ data_call.id }}/review?tab=undecided{{ filter_suffix }}"><span data-i18n="undecided">Undecided</span> ({{ tab_counts.undecided }})</a>
+  <a class="review-tab {% if tab == 'accepted' %}active{% endif %}" href="/calls/{{ data_call.id }}/review?tab=accepted{{ filter_suffix }}"><span data-i18n="accepted">Accepted</span> ({{ tab_counts.accepted }})</a>
+  <a class="review-tab {% if tab == 'rejected' %}active{% endif %}" href="/calls/{{ data_call.id }}/review?tab=rejected{{ filter_suffix }}"><span data-i18n="rejected">Rejected</span> ({{ tab_counts.rejected }})</a>
 </nav>
+<form class="panel ai-filter" method="get" action="/calls/{{ data_call.id }}/review">
+  <input type="hidden" name="tab" value="{{ tab }}">
+  <strong data-i18n="filter_ai">Filter AI recommendations</strong>
+  <label><input type="checkbox" name="ai" value="accept" {% if 'accept' in ai_filters %}checked{% endif %}> <span data-i18n="ai_accept">AI accept</span></label>
+  <label><input type="checkbox" name="ai" value="reject" {% if 'reject' in ai_filters %}checked{% endif %}> <span data-i18n="ai_reject">AI reject</span></label>
+  <label><input type="checkbox" name="ai" value="unsure" {% if 'unsure' in ai_filters %}checked{% endif %}> <span data-i18n="ai_unsure">AI unsure</span></label>
+  <button class="button secondary" type="submit" data-i18n="apply_filter">Apply filter</button>
+  {% if ai_filters %}<a class="link-button" href="/calls/{{ data_call.id }}/review?tab={{ tab }}" data-i18n="clear_filter">Clear</a>{% endif %}
+</form>
 {% if is_caller %}
 <div class="review-actions">
   <form method="post" action="/calls/{{ data_call.id }}/review/apply-ai" onsubmit="return confirm('Apply every decisive AI recommendation?');">

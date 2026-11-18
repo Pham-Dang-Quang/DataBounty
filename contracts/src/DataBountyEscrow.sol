@@ -30,6 +30,7 @@ contract DataBountyEscrow is ReentrancyGuard {
     error TokenTransferMismatch();
 
     event CallFunded(uint256 indexed callId, address indexed owner, uint256 amount, uint64 deadline);
+    event CallFundingAdded(uint256 indexed callId, address indexed owner, uint256 amount);
     event ContributionPaid(
         uint256 indexed callId, bytes32 indexed contributionId, address indexed recipient, uint256 amount
     );
@@ -52,6 +53,21 @@ contract DataBountyEscrow is ReentrancyGuard {
             revert TokenTransferMismatch();
         }
         emit CallFunded(callId, msg.sender, budget, deadline);
+    }
+
+    function addFunds(uint256 callId, uint256 amount) external nonReentrant {
+        Call storage dataCall = calls[callId];
+        if (!dataCall.exists) revert CallNotFound();
+        if (msg.sender != dataCall.owner) revert NotCallOwner();
+        if (amount == 0) revert InvalidCall();
+
+        uint256 balanceBefore = rewardToken.balanceOf(address(this));
+        rewardToken.safeTransferFrom(msg.sender, address(this), amount);
+        if (rewardToken.balanceOf(address(this)) - balanceBefore != amount) {
+            revert TokenTransferMismatch();
+        }
+        dataCall.remaining += amount;
+        emit CallFundingAdded(callId, msg.sender, amount);
     }
 
     function pay(uint256 callId, bytes32 contributionId, address recipient, uint256 amount) external nonReentrant {

@@ -50,6 +50,19 @@ def test_payout_uses_persistent_key_and_hides_duplicate_action() -> None:
     assert 'document.querySelector("[data-payout-pending]")' in ui_js
 
 
+def test_call_top_up_and_ai_filters_are_exposed() -> None:
+    wallet_js = Path("app/static/js/wallet.js").read_text(encoding="utf-8")
+    call_page = Path("app/templates/call_detail.html").read_text(encoding="utf-8")
+    review_page = Path("app/templates/review_queue.html").read_text(encoding="utf-8")
+
+    assert 'functionName: "addFunds"' in wallet_js
+    assert "data-top-up-call" in call_page
+    assert 'name="additional_slots"' in call_page
+    assert 'name="ai" value="accept"' in review_page
+    assert 'name="ai" value="reject"' in review_page
+    assert 'name="ai" value="unsure"' in review_page
+
+
 def test_wallet_transaction_account_must_match_signed_in_user() -> None:
     wallet_js = Path("app/static/js/wallet.js").read_text(encoding="utf-8")
     base_page = Path("app/templates/base.html").read_text(encoding="utf-8")

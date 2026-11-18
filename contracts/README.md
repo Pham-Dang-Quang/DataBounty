@@ -25,3 +25,6 @@ forge script script/Deploy.s.sol:Deploy --rpc-url fuji --broadcast
 
 Copy the emitted token and escrow addresses to the root `.env`. Never commit the deployer key.
 
+The escrow is immutable. Deploy this current version to use `addFunds`; an address deployed from an
+older version cannot add funding to existing calls.
+

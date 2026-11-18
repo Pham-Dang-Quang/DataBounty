@@ -204,6 +204,27 @@ def test_bulk_ai_decisions_and_accepted_only_zip(client: ASGITestClient) -> None
         assert "reject.csv" not in manifest
 
 
+def test_review_queue_filters_multiple_ai_recommendations(
+    client: ASGITestClient, monkeypatch
+) -> None:
+    monkeypatch.setattr("app.main.hash_password", lambda _password: "test-password-hash")
+    caller = Account.create()
+    sign_in(client, caller.key.hex())
+    call_id = create_call(client, "Filtered review")
+    open_call(client, call_id)
+    add_contribution(client, call_id, "accept-filter.csv", ContributionStatus.READY, "accept")
+    add_contribution(client, call_id, "reject-filter.csv", ContributionStatus.READY, "reject")
+    add_contribution(client, call_id, "unsure-filter.csv", ContributionStatus.READY, "unsure")
+
+    filtered = client.get(
+        f"/calls/{call_id}/review?tab=undecided&ai=accept&ai=unsure"
+    )
+    assert filtered.status_code == 200
+    assert "accept-filter.csv" in filtered.text
+    assert "unsure-filter.csv" in filtered.text
+    assert "reject-filter.csv" not in filtered.text
+
+
 def test_reviewer_gets_watermarked_preview_but_contributor_keeps_original(
     client: ASGITestClient,
 ) -> None:

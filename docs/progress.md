@@ -4,13 +4,45 @@ Last updated: 2026-11-18
 
 ## Current status
 
-- Phase: CSV and image-segmentation-text contribution types
-- State: Implemented and verified
-- Next demo milestone: restart the application and verify contribution 2 in Accepted and in the
-  caller's confirmed-data ZIP
+- Phase: Demo metadata cleanup
+- State: Renamed the ten demo accounts to natural identities, removed generated contribution files and
+  demo contribution rows, and retained one metadata markdown file per call.
+- Next demo milestone: log in with a demo account and walk through the five call descriptions.
+
+### Latest demo seed work
+
+- Added `demo/seed_demo_content.py`, an idempotent SQLite/file seeder using the existing models.
+- Added `demo_account/accounts.csv` and `demo_account/README.md` with 10 local-only accounts.
+- Added `demo_data/` with five call-specific subdirectories and `SOURCES.md`; each call has 3 invalid,
+  3 valid-but-low-quality, and 3 valid-good fixtures. Segmentation fixtures include paired masks.
+- Seeded three comments/replies per call and persisted AI recommendations/validation summaries so the
+  review UI can demonstrate reject, unsure, and accept paths.
+- Verification: seeder completed; Ruff passed for the seeder; SQLite inspection confirmed 10 demo users,
+  5 named calls, 9 contributions per call, and discussion rows. The generated files are artificial and
+  do not redistribute third-party source data.
+- Follow-up verification: `demo_data/` contains only `info_call_1.md` through `info_call_5.md`; the
+  named calls have zero seeded contributions; the account CSV and database contain the natural demo
+  identities; Ruff still passes for the seeder.
+- Added `demo/seed_discussions.py` with call-specific debate prompts and one-level replies. Every call,
+  including Phạm Đăng Quang's existing chest X-ray call, now has 24-26 comments/replies. Ruff passed
+  for both demo seed scripts.
+- Kept the reproducible scripts under `demo/` as source while ignoring generated `demo_account/` and
+  `demo_data/` outputs so demo credentials and disposable fixtures are not committed.
 
 ## Completed
 
+- Added owner-only `addFunds` escrow funding with exact-transfer checks and a funding-added event.
+  The caller UI prices each additional acceptance slot at the maximum reward tier, approves DBT,
+  submits the Fuji top-up, and expands `max_acceptances` only after the backend verifies confirmation,
+  exact escrow/caller/call/amount calldata, transaction reuse, and sufficient remaining liability.
+  No schema change was needed.
+- Confirmed that submissions were already independent of the acceptance limit and made that behavior
+  explicit: contributors may submit until the deadline, while manual and bulk acceptance stop at the
+  funded limit. Callers can still inspect the queued data before funding more slots.
+- Confirmed the hosted evaluator already parses explicit `accept`, `reject`, and `unsure` outputs;
+  added direct `unsure` coverage plus combined accept/reject/unsure filters across all review tabs.
+- This funding/filter implementation made no active-database or schema changes; the separate demo
+  seeding work is recorded in the current-status section above.
 - Decoded payout revert `0xf8166afa` as `ContributionAlreadyPaid()` and verified recorded Fuji
   transaction `0x9f2b…e96` succeeded at block 61268671, transferring 2,000,000 DBT units to the
   intended contributor. Reconciled the active resubmitted contribution 2 to `paid`/Accepted; no
@@ -152,6 +184,11 @@ Last updated: 2026-11-18
 
 ## Verification
 
+- Expansion/filter verification: Ruff and mypy passed; `wallet.js` and `ui.js` passed `node --check`;
+  all 6 Foundry tests passed, including owner-only added funding and updated remaining balance. The
+  13 frontend tests, explicit AI-unsure test, and pure remaining-liability test passed (15 focused
+  tests total). Authenticated temporary-database runs, including the pre-existing health test,
+  stalled in the existing test harness and were stopped without touching active data.
 - Fuji verification: transaction `0x9f2b…e96` has status 1, emits the expected DBT transfer and
   `ContributionPaid` event for call `6373351965198043963` and legacy key `keccak256("2")`; the
   escrow's `paid` lookup returns true. Local contribution 2 is now `paid`, has exactly one payout
@@ -206,6 +243,9 @@ Last updated: 2026-11-18
 
 ## Known constraints
 
+- The currently configured Fuji escrow predates `addFunds` and cannot be upgraded. Top-ups require a
+  new deployment and address configuration; existing calls bound to the old escrow cannot use this
+  feature in place.
 - The resumed Fuji deployment succeeded from `0xbe51…7698b`; its nonce advanced from 1 to 4. Token
   `0x1f8e…C4AB` and escrow `0xDC43…d7F0` contain verified on-chain bytecode (3,778 and 5,330 hex
   characters respectively), and the application now uses this fresh deployment.
@@ -224,6 +264,7 @@ Last updated: 2026-11-18
 
 ## Exact next step
 
-Restart the application so the payout-key migration and updated browser assets are loaded. Open
-contribution 2 and verify it appears as Accepted with transaction `0x9f2b…e96`, then download the
-call's accepted-data ZIP and confirm the paid contribution is included.
+Deploy the updated contracts to Fuji, update `TOKEN_CONTRACT_ADDRESS` and
+`ESCROW_CONTRACT_ADDRESS`, restart the app, then create and initially fund a fresh call before testing
+the additional-slot top-up. Do not modify the active demo database until the owner's separate data
+enrichment agent has finished.

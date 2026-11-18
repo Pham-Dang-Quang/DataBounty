@@ -48,7 +48,9 @@ and remains available for manual review.
 
 ### Avalanche Fuji
 
-One small escrow contract holds the demo ERC-20 for calls. It records call funding and prevents duplicate or excessive payouts. The browser submits user-authorized transactions; Python reads events and updates the UI.
+One small escrow contract holds the demo ERC-20 for calls. It records initial and additional call
+funding and prevents duplicate or excessive payouts. The browser submits user-authorized
+transactions; Python verifies confirmed balances and updates the UI.
 
 ## Main data flow
 
@@ -80,10 +82,11 @@ The contract should only:
 
 - create/register a funded call;
 - track remaining reward balance;
+- let only the call owner add funding to an existing call;
 - pay a persistent random contribution key once to a recipient;
 - reject unauthorized, duplicate, or excessive payouts;
 - return unused funds after the deadline;
-- emit funding, payout, and refund events.
+- emit initial funding, added funding, payout, and refund events.
 
 Do not put uploads, AI logic, criteria interpretation, user profiles, or general application state in Solidity.
 

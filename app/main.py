@@ -22,6 +22,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
     Request,
     Response,
     UploadFile,
@@ -164,6 +165,16 @@ class VerifyRequest(BaseModel):
 
 class TransactionRequest(BaseModel):
     tx_hash: str
+
+
+class TopUpTransactionRequest(TransactionRequest):
+    additional_slots: int
+
+
+def required_remaining_liability(
+    max_acceptances: int, paid_count: int, maximum_reward: int
+) -> int:
+    return max(0, max_acceptances - paid_count) * maximum_reward
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -660,6 +671,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             .order_by(Comment.created_at.asc())
         ).all()
         user = current_user(request, db)
+        accepted_count = sum(
+            item.final_decision == "accept" for item in data_call.contributions
+        )
         return render(
             request,
             "call_detail.html",
@@ -670,6 +684,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             undecided_count=sum(
                 item.status in UNDECIDED_STATUSES for item in data_call.contributions
             ),
+            accepted_count=accepted_count,
             can_review=bool(user and can_review_call(db, data_call, user)),
         )
 
@@ -993,17 +1008,96 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         return RedirectResponse(f"/contributions/{contribution.id}", status_code=303)
 
+    @app.post("/calls/{call_id}/top-up-tx")
+    def record_call_top_up(
+        call_id: int,
+        request: Request,
+        payload: TopUpTransactionRequest,
+        db: Session = Depends(get_db),
+    ) -> dict[str, int]:
+        caller = require_user(request, db)
+        data_call = owned_call(db, call_id, caller)
+        if data_call.status != CallStatus.OPEN or as_utc(data_call.deadline) <= datetime.now(UTC):
+            raise HTTPException(
+                status_code=409, detail="Only an active call can receive more funding"
+            )
+        if not 1 <= payload.additional_slots <= 100_000 - data_call.max_acceptances:
+            raise HTTPException(status_code=422, detail="Additional contributions are out of range")
+        if not chain.configured:
+            raise HTTPException(status_code=409, detail="Escrow contract is not configured")
+        validate_tx_hash(payload.tx_hash)
+        duplicate_tx = db.scalar(select(Event.id).where(Event.tx_hash == payload.tx_hash))
+        if duplicate_tx is not None:
+            raise HTTPException(status_code=409, detail="This funding transaction was already used")
+        if chain.transaction_state(payload.tx_hash).state != "confirmed":
+            raise HTTPException(
+                status_code=409, detail="Additional funding is not confirmed on Fuji"
+            )
+        added_amount = payload.additional_slots * data_call.maximum_reward
+        escrow_call_id = data_call.escrow_call_id or data_call.id
+        if not chain.top_up_matches(
+            payload.tx_hash,
+            escrow_call_id,
+            added_amount,
+            data_call.caller.wallet_address,
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="The transaction does not match this call's additional funding",
+            )
+
+        paid_count = int(
+            db.scalar(
+                select(func.count(Contribution.id)).where(
+                    Contribution.call_id == call_id,
+                    Contribution.status == ContributionStatus.PAID,
+                )
+            )
+            or 0
+        )
+        new_maximum = data_call.max_acceptances + payload.additional_slots
+        required_remaining = required_remaining_liability(
+            new_maximum, paid_count, data_call.maximum_reward
+        )
+        remaining = chain.call_remaining(
+            escrow_call_id, data_call.caller.wallet_address
+        )
+        if remaining is None or remaining < required_remaining:
+            raise HTTPException(
+                status_code=409,
+                detail="The confirmed escrow balance is insufficient for this expanded limit",
+            )
+
+        data_call.max_acceptances = new_maximum
+        db.add(
+            Event(
+                call_id=call_id,
+                event_type="funding_added",
+                message=(
+                    f"Caller funded {payload.additional_slots} additional acceptance slot(s); "
+                    f"maximum is now {new_maximum}"
+                ),
+                tx_hash=payload.tx_hash,
+            )
+        )
+        db.commit()
+        return {"max_acceptances": new_maximum}
+
     @app.get("/calls/{call_id}/review", response_class=HTMLResponse)
     def review_queue(
         call_id: int,
         request: Request,
         tab: str = "undecided",
+        ai: list[str] | None = Query(None),
         db: Session = Depends(get_db),
     ) -> HTMLResponse:
         user = require_user(request, db)
         data_call = reviewable_call(db, call_id, user)
         if tab not in {"undecided", "accepted", "rejected"}:
             raise HTTPException(status_code=422, detail="Review tab is invalid")
+        ai_filters = set(ai or [])
+        if not ai_filters <= {"accept", "reject", "unsure"}:
+            raise HTTPException(status_code=422, detail="AI recommendation filter is invalid")
         all_contributions = db.scalars(
             select(Contribution)
             .options(
@@ -1020,14 +1114,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 item for item in all_contributions if item.status == ContributionStatus.REJECTED
             ],
         }
+        visible_contributions = grouped[tab]
+        if ai_filters:
+            visible_contributions = [
+                item for item in visible_contributions if item.ai_recommendation in ai_filters
+            ]
+        committed_count = sum(
+            item.final_decision == "accept" for item in all_contributions
+        )
+        filter_suffix = "".join(f"&ai={value}" for value in sorted(ai_filters))
         return render(
             request,
             "review_queue.html",
             db=db,
             data_call=data_call,
-            contributions=grouped[tab],
+            contributions=visible_contributions,
             tab=tab,
             tab_counts={name: len(items) for name, items in grouped.items()},
+            ai_filters=ai_filters,
+            filter_suffix=filter_suffix,
+            acceptance_full=committed_count >= data_call.max_acceptances,
             is_caller=data_call.caller_id == user.id,
         )
 
@@ -1648,7 +1754,10 @@ def apply_contribution_decision(
             )
         )
         if int(accepted or 0) >= contribution.data_call.max_acceptances:
-            raise HTTPException(status_code=409, detail="The acceptance limit has been reached")
+            raise HTTPException(
+                status_code=409,
+                detail="Fund more DBT and expand the acceptance limit before accepting more data",
+            )
         contribution.final_tier = tier
         contribution.reward_amount = (
             contribution.data_call.high_reward

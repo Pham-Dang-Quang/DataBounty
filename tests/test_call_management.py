@@ -4,6 +4,8 @@ from datetime import UTC, datetime, timedelta
 
 from eth_account import Account
 
+from app.blockchain import TransactionState
+from app.main import required_remaining_liability
 from app.models import CallLink, CallStatus, Comment, Contribution, DataCall
 from tests.conftest import ASGITestClient
 from tests.test_app import create_call, sign_in
@@ -21,6 +23,11 @@ def edited_call_data() -> dict[str, str]:
         "max_acceptances": "2",
         "deadline": (datetime.now(UTC) + timedelta(days=4)).strftime("%Y-%m-%dT%H:%M"),
     }
+
+
+def test_remaining_liability_accounts_for_confirmed_payouts() -> None:
+    assert required_remaining_liability(8, 3, 2_000_000) == 10_000_000
+    assert required_remaining_liability(3, 3, 2_000_000) == 0
 
 
 def test_new_contributions_receive_unique_persistent_payout_keys(
@@ -119,6 +126,45 @@ def test_maximum_accepted_can_exceed_one_hundred(client: ASGITestClient) -> None
 
     form = client.get(f"/calls/{call_id}/edit")
     assert 'name="max_acceptances" min="1" max="100000"' in form.text
+
+
+def test_confirmed_top_up_expands_acceptance_limit(
+    client: ASGITestClient, monkeypatch
+) -> None:
+    monkeypatch.setattr("app.main.hash_password", lambda _password: "test-password-hash")
+    caller = Account.create()
+    wallet = sign_in(client, caller.key.hex())
+    call_id = create_call(client)
+    with client.app.state.database.session_factory() as db:
+        data_call = db.get(DataCall, call_id)
+        assert data_call is not None
+        data_call.status = CallStatus.OPEN
+        db.commit()
+
+    chain = client.app.state.chain
+    chain.settings.escrow_contract_address = "0x0000000000000000000000000000000000000001"
+    chain.settings.token_contract_address = "0x0000000000000000000000000000000000000002"
+    monkeypatch.setattr(
+        chain, "transaction_state", lambda _tx_hash: TransactionState("confirmed", 1)
+    )
+    monkeypatch.setattr(
+        chain,
+        "top_up_matches",
+        lambda _tx_hash, _call_id, _amount, owner: owner == wallet,
+    )
+    monkeypatch.setattr(chain, "call_remaining", lambda _call_id, _owner: 10_000_000)
+
+    response = client.post(
+        f"/calls/{call_id}/top-up-tx",
+        json={"tx_hash": f"0x{'1' * 64}", "additional_slots": 2},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"max_acceptances": 5}
+
+    with client.app.state.database.session_factory() as db:
+        data_call = db.get(DataCall, call_id)
+        assert data_call is not None
+        assert data_call.max_acceptances == 5
 
 
 def test_funding_submission_freezes_edit_and_remove(client: ASGITestClient) -> None:

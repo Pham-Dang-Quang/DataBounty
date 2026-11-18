@@ -33,6 +33,8 @@ The same wallet may act as both.
 11. The caller sends the payout transaction through their wallet. Only confirmed-paid data becomes
     accepted and downloadable in the ZIP.
 12. The UI shows the confirmed transaction and updated escrow balance.
+13. Contributors may continue submitting after the acceptance limit is full. The caller may review
+    them, but must add enough DBT to escrow and expand the limit before approving another payout.
 
 ## Data call fields
 
@@ -107,6 +109,8 @@ Do not download or run CLIP or Qwen locally.
   popup instead of a separate error page. API errors remain structured for the same popup in JavaScript.
 - A live days/hours/minutes/seconds countdown beside each call's deadline.
 - A simple audit timeline for call funding, submission, review, and payout.
+- Owner-only additional funding that expands the acceptance limit after Fuji confirmation.
+- Combined review filters for AI accept, reject, and unsure recommendations.
 
 ## Not in the MVP
 

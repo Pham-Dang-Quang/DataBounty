@@ -127,6 +127,9 @@ dt { color: var(--muted); font-weight: 700; } dd { margin: 0; }
 .protected-review .notice { margin-bottom: 1rem; }
 .protected-media { pointer-events: none; image-rendering: auto; }
 .review-actions { display: flex; gap: .75rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.ai-filter { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; }
+.ai-filter label { display: inline-flex; gap: .35rem; align-items: center; }
+.top-up-form { margin-top: 1rem; }
 .moderator-controls { margin-top: 1.5rem; border-top: 1px solid var(--line); padding-top: 1rem; }
 .moderator-controls h3 { margin-top: 0; }
 .inline-form { display: flex; gap: .75rem; align-items: end; flex-wrap: wrap; }

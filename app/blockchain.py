@@ -11,6 +11,16 @@ from app.config import Settings
 
 ESCROW_ABI = [
     {
+        "inputs": [
+            {"name": "callId", "type": "uint256"},
+            {"name": "amount", "type": "uint256"},
+        ],
+        "name": "addFunds",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
         "inputs": [{"name": "callId", "type": "uint256"}],
         "name": "calls",
         "outputs": [
@@ -89,6 +99,32 @@ class BlockchainService:
             bool(exists)
             and Web3.to_checksum_address(chain_owner) == Web3.to_checksum_address(owner)
             and int(remaining) >= minimum_balance
+        )
+
+    def call_remaining(self, call_id: int, owner: str) -> int | None:
+        chain_owner, remaining, _deadline, exists = self.contract.functions.calls(call_id).call()
+        if not exists or Web3.to_checksum_address(chain_owner) != Web3.to_checksum_address(owner):
+            return None
+        return int(remaining)
+
+    def top_up_matches(
+        self, tx_hash: str, call_id: int, amount: int, owner: str
+    ) -> bool:
+        try:
+            transaction = self.web3.eth.get_transaction(cast(HexStr, tx_hash))
+            function, arguments = self.contract.decode_function_input(transaction["input"])
+        except Exception:
+            return False
+        recipient = transaction.get("to")
+        sender = transaction.get("from")
+        return bool(
+            recipient
+            and sender
+            and Web3.to_checksum_address(recipient) == self.contract.address
+            and Web3.to_checksum_address(sender) == Web3.to_checksum_address(owner)
+            and function.fn_name == "addFunds"
+            and int(arguments["callId"]) == call_id
+            and int(arguments["amount"]) == amount
         )
 
     def contribution_is_paid(self, call_id: int, payout_key: str) -> bool:
