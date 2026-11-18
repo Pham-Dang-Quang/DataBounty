@@ -762,8 +762,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         db: Session = Depends(get_db),
     ) -> RedirectResponse:
         user = require_user(request, db)
-        if db.get(DataCall, call_id) is None:
+        data_call = db.get(DataCall, call_id)
+        if data_call is None:
             raise HTTPException(status_code=404, detail="Call not found")
+        if data_call.status == CallStatus.DRAFT and not can_review_call(db, data_call, user):
+            raise HTTPException(
+                status_code=403,
+                detail="Only the caller or an assigned moderator can comment on a draft call",
+            )
         text_body = body.strip()
         if not 1 <= len(text_body) <= 1000:
             raise HTTPException(status_code=422, detail="Comment must contain 1 to 1000 characters")

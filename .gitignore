@@ -20,9 +20,8 @@ contracts/lib/
 .deck-build/
 presentation-output/
 sample_data/
+demo/
 demo_account/
 demo_data/
 pitch.md
 presentation.md
-
-

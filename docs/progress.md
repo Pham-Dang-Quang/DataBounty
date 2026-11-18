@@ -26,6 +26,22 @@ Last updated: 2026-11-18
 - Added `demo/seed_discussions.py` with call-specific debate prompts and one-level replies. Every call,
   including Phạm Đăng Quang's existing chest X-ray call, now has 24-26 comments/replies. Ruff passed
   for both demo seed scripts.
+- Per owner instruction, changed the five newly added calls to `draft` and cleared their fabricated
+  funding transaction hashes. Their escrow IDs and budgets remain intact for the owner's real Fuji
+  funding transactions; no contributions can be submitted while they are drafts.
+- Draft discussion policy is now enforced in `app/main.py`: only the caller or an assigned moderator
+  may post comments on a draft call. Removed all prior draft-call comments, assigned two moderators to
+  each of the five draft calls, and seeded 16 caller/moderator-only debate comments per call.
+- Verification: all five draft calls have two moderators, 16 comments each, and every comment author is
+  either the caller or an assigned moderator; Ruff passes for the changed application and seed script.
+- Replaced the earlier robotic discussion copy with natural, call-specific back-and-forth: concrete
+  examples, disagreements, follow-up questions, and concessions across all six calls. Each call now
+  has 16 comments/replies; draft-call authorship remains caller/moderator-only. Ruff passes for the
+  refresh script and database verification completed successfully.
+- Rotated draft-call ownership and moderation across the demo accounts: each of the five draft calls
+  now has a different caller and a distinct two-person moderator pair. Rebuilt their discussions with
+  matching authors and staggered UTC timestamps over roughly six days; verification confirms no future
+  timestamps and 16 comments per draft call. Added `demo/rebalance_draft_discussions.py`.
 - Kept the reproducible scripts under `demo/` as source while ignoring generated `demo_account/` and
   `demo_data/` outputs so demo credentials and disposable fixtures are not committed.
 
