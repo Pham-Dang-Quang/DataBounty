@@ -213,6 +213,13 @@ def test_call_links_comments_and_one_level_replies(client: ASGITestClient) -> No
     assert "https://example.com/portfolio" in page.text
     assert "https://github.com/example" in page.text
 
+    database = client.app.state.database
+    with database.session_factory() as db:
+        data_call = db.get(DataCall, call_id)
+        assert data_call is not None
+        data_call.status = CallStatus.OPEN
+        db.commit()
+
     client.post("/api/auth/logout")
     sign_in(client, visitor.key.hex())
     posted = client.post(
@@ -222,7 +229,6 @@ def test_call_links_comments_and_one_level_replies(client: ASGITestClient) -> No
     )
     assert posted.status_code == 303
 
-    database = client.app.state.database
     with database.session_factory() as db:
         data_call = db.get(DataCall, call_id)
         assert data_call is not None

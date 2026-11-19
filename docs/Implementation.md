@@ -8,11 +8,16 @@ Status: MVP and requested scope extension implemented; final two-account payout 
 app/
   main.py
   auth.py
+  call_rules.py
+  lifecycle.py
   models.py
+  previews.py
+  review_service.py
   schemas.py
-  services/
-    evaluation.py
-    blockchain.py
+  upload_validation.py
+  evaluation.py
+  blockchain.py
+  routes_*.py
   templates/
   static/css/
   static/js/
@@ -22,7 +27,8 @@ data/uploads/        # ignored by Git
 docs/
 ```
 
-Create more modules only when a file becomes difficult to understand.
+Keep each Python source file at or below roughly 300 lines. Split by an existing user flow or
+business responsibility; do not add framework layers or speculative abstractions.
 
 ## Phase 1: local web flow
 

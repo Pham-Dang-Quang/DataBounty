@@ -16,6 +16,13 @@ Use FastAPI, Jinja2, SQLAlchemy, SQLite, and Python AI libraries. Use plain CSS 
 
 Use SQLite, local private uploads, and simple background execution. PostgreSQL, S3, Celery, and Redis are deferred.
 
+### Small modules in one deployable application
+
+Keep the FastAPI application as one process, but keep every Python file in `app/` at or below
+roughly 300 lines. `main.py` is composition only; route files follow user-facing flows, while shared
+rules, validation, previews, decisions, and lifecycle synchronization use direct function modules.
+Do not introduce service containers, repositories, or another framework for this separation.
+
 ### Fuji test rewards
 
 Use a mock ERC-20 on Avalanche Fuji. Do not implement fiat, custody, a custom currency, mainnet, a custom L1, or cross-chain transfers.

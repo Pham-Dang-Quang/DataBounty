@@ -1,13 +1,28 @@
 # Implementation Progress
 
-Last updated: 2026-11-18
+Last updated: 2026-11-19
 
 ## Current status
 
-- Phase: Demo metadata cleanup
-- State: Renamed the ten demo accounts to natural identities, removed generated contribution files and
-  demo contribution rows, and retained one metadata markdown file per call.
-- Next demo milestone: log in with a demo account and walk through the five call descriptions.
+- Phase: Application source refactor
+- State: Split the oversized FastAPI entry point and evaluation module into focused route and
+  business-rule modules. Every Python file under `app/` is now 277 lines or fewer, with no database,
+  schema, template, static-asset, or user-data changes.
+- Next milestone: review the module boundaries, then continue the existing Fuji deployment/demo
+  milestone without changing the active database.
+
+### Latest source refactor
+
+- Reduced `app/main.py` from 1,928 lines to application assembly only.
+- Grouped routes by accounts, call creation/management, community, funding, submissions, review,
+  and contribution files/actions.
+- Extracted call rules, review decisions, preview generation, chain/evaluation lifecycle work,
+  shared web dependencies, request schemas, constants, and deterministic upload validation.
+- Kept the existing endpoints, templates, database models, and AI API contract unchanged.
+- Verification: all app files are at most 275 lines; Ruff, mypy, and `git diff --check` pass. The
+  full suite ran outside the restricted Windows sandbox and all 57 tests passed. The discussion
+  test now opens its call before exercising visitor comments, matching the documented restriction
+  that draft discussions are caller/moderator-only.
 
 ### Latest demo seed work
 

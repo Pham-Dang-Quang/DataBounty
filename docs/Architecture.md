@@ -18,6 +18,12 @@ One Python application provides:
 
 Keep code separated into small modules, but deploy it as one application.
 
+`app/main.py` only assembles the application. Route modules are grouped by user flow (accounts,
+calls, community, funding, submissions, review, and contribution access/actions). Shared business
+rules live in small modules for call rules, upload validation, evaluation, preview generation,
+review decisions, and chain-state lifecycle updates. Every Python source file in `app/` stays at or
+below roughly 300 lines so the complete request path remains easy to follow.
+
 ### Browser
 
 Use HTML, CSS, and vanilla JavaScript. `viem` handles wallet connection, signatures, funding, and payout transactions. No SPA framework is needed.
